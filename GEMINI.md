@@ -178,6 +178,10 @@ This allows communication with installed screen readers (NVDA, JAWS, SAPI, etc.)
 
 
 
+- [x] Level-up item selection (UpgradeButton) - reads item name, description, rarity
+
+
+
 - [ ] Meta-progression / upgrades
 
 

@@ -139,66 +139,47 @@ namespace MegabonkAccess
 
         private static string GetUpgradeButtonText(MyButton instance)
         {
+            // Use component search pattern (same as CharacterInfoUIPatch)
+            // This bypasses IL2CPP field obfuscation issues
+            var allTexts = SafeGetComponentsInChildren<TextMeshProUGUI>(instance.transform);
             var sb = new System.Text.StringBuilder();
             
-            // Try to read private fields
-            var type = instance.GetType();
-            
-            // Basic UI Text fallback first (safest)
-            string name = GetTextViaReflection(instance, "t_name");
-            string rarity = GetTextViaReflection(instance, "t_rarity");
-            string level = GetTextViaReflection(instance, "t_level");
-            string desc = GetTextViaReflection(instance, "t_description");
-
-            if (!string.IsNullOrEmpty(name)) sb.Append(name).Append(". ");
-            if (!string.IsNullOrEmpty(rarity)) sb.Append(rarity).Append(". ");
-            if (!string.IsNullOrEmpty(level)) sb.Append(level).Append(". ");
-            if (!string.IsNullOrEmpty(desc)) sb.Append(desc).Append(". ");
-
-            // If UI text found, good. If not, try Data?
-            // Attempting Data via reflection invoke to avoid MissingMethodException
-            if (sb.Length < 5) 
+            foreach (var tmp in allTexts)
             {
-                // Try IUpgradable
-                try {
-                    var upgradableField = AccessTools.Field(type, "upgradable");
-                    var upgradable = upgradableField?.GetValue(instance); // Object
-                    if (upgradable != null)
-                    {
-                        // Dynamic invoke GetUpgradeDescription
-                        // Method signature: GetUpgradeDescription(int, List<StatModifier>, ERarity)
-                        // This is hard to invoke safely if types mismatch.
-                        // Try simple GetName()
-                        var getName = AccessTools.Method(upgradable.GetType(), "GetName");
-                        if (getName != null) sb.Append(getName.Invoke(upgradable, null)).Append(". ");
-                    }
-                } catch {}
+                if (tmp == null) continue;
+                
+                string text = SanitizeText(tmp.text);
+                if (string.IsNullOrEmpty(text)) continue;
+                
+                // Skip very short texts (likely labels like "Lvl")
+                if (text.Length < 3) continue;
+                
+                sb.Append(text).Append(". ");
             }
-
+            
             return sb.ToString();
         }
 
         private static string GetEncounterButtonText(MyButton instance)
         {
-            string desc = GetTextViaReflection(instance, "t_description");
-            string rarity = GetTextViaReflection(instance, "t_rarity");
-            return $"{rarity}. {desc}";
+            // Use component search pattern for consistency
+            var allTexts = SafeGetComponentsInChildren<TextMeshProUGUI>(instance.transform);
+            var sb = new System.Text.StringBuilder();
+            
+            foreach (var tmp in allTexts)
+            {
+                if (tmp == null) continue;
+                
+                string text = SanitizeText(tmp.text);
+                if (string.IsNullOrEmpty(text)) continue;
+                if (text.Length < 3) continue;
+                
+                sb.Append(text).Append(". ");
+            }
+            
+            return sb.ToString();
         }
 
-        private static string GetTextViaReflection(object instance, string fieldName)
-        {
-            try
-            {
-                var field = AccessTools.Field(instance.GetType(), fieldName);
-                if (field != null)
-                {
-                    var tmp = field.GetValue(instance) as TextMeshProUGUI;
-                    if (tmp != null) return tmp.text;
-                }
-            }
-            catch {}
-            return "";
-        }
 
         private static void SpeakSetting(BetterSetting setting)
         {
