@@ -1,0 +1,24 @@
+public enum ECharacter
+{
+	Fox,
+	Calcium,
+	SirOofie,
+	Cl4nk,
+	Megachad,
+	Ogre,
+	Robinette,
+	Athena,
+	Birdo,
+	Bush,
+	Bandit,
+	Monke,
+	Noelle,
+	TonyMcZoom,
+	Amog,
+	Spaceman,
+	Ninja,
+	Vlad,
+	Dicehead,
+	SirChadwell,
+	Roberto
+}

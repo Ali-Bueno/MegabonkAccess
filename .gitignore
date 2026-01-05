@@ -1,0 +1,18 @@
+# Standard Visual Studio / C# ignore
+.vs/
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# Unity / BepInEx specific
+*.user
+*.userprefs
+*.pidb
+*.suo
+*.ide
+*.sln.docstates
+
+# Temporary files
+tmp/
+*.log

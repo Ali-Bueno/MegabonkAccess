@@ -1,0 +1,50 @@
+using System;
+
+namespace Assets.Scripts.Saves___Serialization.Progression.Stats;
+
+[Serializable]
+public enum EMyStat
+{
+	kills,
+	goldEarned,
+	goldSpent,
+	chestsOpened,
+	itemsPickedUp,
+	eliteKills,
+	bossKills,
+	xpGained,
+	skeletonKills,
+	damageReductionArmorAsKnight,
+	damageReductionArmor,
+	projectilesFired,
+	evades,
+	potsBroken,
+	shrineSucc,
+	fireKills,
+	shrineCharge,
+	lifestealHealing,
+	shrineChallenge,
+	crits,
+	chestsBought,
+	minibossKills,
+	runs,
+	silverEarned,
+	cactusKillsWithThorns,
+	lightningKills,
+	standingStillKills,
+	bloodMagicProcs,
+	finalBossKills,
+	icecubeFreezes,
+	foxWispsKills,
+	powerupsUsed,
+	goblinKills,
+	minibossKillsCalcium,
+	killsInTornadoWithTornado,
+	moldyCheeseProcs,
+	questsCompleted,
+	challengesCompleted,
+	wallhugs,
+	unlocksPurchased,
+	shrineChargeSandstorm,
+	aegisBlocks
+}

@@ -1,0 +1,27 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.24720.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assembly-CSharp", "Assembly-CSharp\Assembly-CSharp.csproj", "{A7745EFB-39C9-4AC5-A789-8DA254EDDD59}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__Generated", "__Generated\__Generated.csproj", "{6623D351-20E4-48CE-9C64-FA14216BD061}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|AnyCPU = Debug|AnyCPU
+		Release|AnyCPU = Release|AnyCPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A7745EFB-39C9-4AC5-A789-8DA254EDDD59}.Debug|AnyCPU.ActiveCfg = Debug|AnyCPU
+		{A7745EFB-39C9-4AC5-A789-8DA254EDDD59}.Debug|AnyCPU.Build.0 = Debug|AnyCPU
+		{A7745EFB-39C9-4AC5-A789-8DA254EDDD59}.Release|AnyCPU.ActiveCfg = Release|AnyCPU
+		{A7745EFB-39C9-4AC5-A789-8DA254EDDD59}.Release|AnyCPU.Build.0 = Release|AnyCPU
+		{6623D351-20E4-48CE-9C64-FA14216BD061}.Debug|AnyCPU.ActiveCfg = Debug|AnyCPU
+		{6623D351-20E4-48CE-9C64-FA14216BD061}.Debug|AnyCPU.Build.0 = Debug|AnyCPU
+		{6623D351-20E4-48CE-9C64-FA14216BD061}.Release|AnyCPU.ActiveCfg = Release|AnyCPU
+		{6623D351-20E4-48CE-9C64-FA14216BD061}.Release|AnyCPU.Build.0 = Release|AnyCPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
