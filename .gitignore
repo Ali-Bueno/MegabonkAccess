@@ -16,3 +16,7 @@ obj/
 # Temporary files
 tmp/
 *.log
+
+# Proprietary / Decompiled Code
+megabonk code/
+references/
