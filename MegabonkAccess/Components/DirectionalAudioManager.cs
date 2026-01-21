@@ -43,6 +43,10 @@ namespace MegabonkAccess.Components
         private float sceneLoadTime = 0f;
         private float sceneStartDelay = 4f;  // Wait 4 seconds after scene load before playing beacons
 
+        // Death camera tracking (cached for performance)
+        private GameObject cachedDeathCamera = null;
+        private float nextDeathCameraSearchTime = 0f;
+
         // Configuraciones por tipo (pitch, intervalo en segundos, volumen)
         // Intervalos aumentados para ser menos molestos
         private static readonly Dictionary<string, (float pitch, float interval, float volume)> typeConfigs =
@@ -468,58 +472,33 @@ namespace MegabonkAccess.Components
 
         private void ScanRootObjectsByName(Vector3 playerPos)
         {
-            // Base names for interactables (without Clone suffix)
-            string[] baseNames = {
-                // Shrines/Santuarios (both naming conventions)
-                "ShrineMaoi", "ShrineBalance", "ShrineChallenge",
-                "ShrineGreed", "ShrineCursed", "ShrineMagnet", "Shrine",
-                "ShrineHealth", "ShrineGold", "ShrinePower", "ShrineSpeed",
-                "CursedShrine", "GreedShrine", "BalanceShrine", "MagnetShrine",
-                "ChallengeShrine", "MaoiShrine", "HealthShrine", "GoldShrine",
-                // Chests/Cofres
-                "Chest", "ChestSmall", "ChestBig", "ChestGold", "ChestSilver",
-                "TreasureChest", "GoldChest", "SilverChest",
-                "SmallChest", "BigChest",
-                // Portals
-                "Portal", "PortalFinal", "ExitPortal", "BossPortal",
-                // Pots/Vasijas (all combinations)
-                "Pot", "PotSmall", "PotBig", "PotSilver", "PotGold",
-                "PotSmallSilver", "PotSmallGold", "PotBigSilver", "PotBigGold",
-                "SmallPot", "BigPot", "SilverPot", "GoldPot",
-                "Urn", "Vase", "Jar", "Breakable",
+            // OPTIMIZED: Only search for common names, rely on ScanSiblingsForDuplicates
+            // to find duplicates. No numbered variants - siblings scan handles that.
+            string[] priorityNames = {
+                // Most important - unique objects
+                "Portal", "Portal(Clone)",
+                "Chest", "Chest(Clone)",
+                "BossSpawner", "BossSpawner(Clone)",
+                // Shrines (just base patterns)
+                "Shrine", "ShrineCursed(Clone)", "ShrineGreed(Clone)",
+                "ShrineMoai(Clone)", "ShrineBalance(Clone)",
+                // Charge shrines / Pylons (stand on to charge)
+                "ChargeShrine", "ChargeShrine(Clone)",
+                "BossPylon", "BossPylon(Clone)",
+                "Pylon", "Pylon(Clone)",
+                // Pots - just one, siblings will find the rest
+                "PotSmall(Clone)", "PotSmallSilver(Clone)",
                 // NPCs
-                "NPC", "Merchant", "ShadyGuy", "Vendor", "Shopkeeper",
-                // Music/Revienta música
-                "Boombox", "Microwave", "MusicBuster", "MusicBox",
-                "Jukebox", "Radio", "Speaker", "MusicPlayer",
-                // Otros
-                "Borgor", "Health", "Gift", "HealthPickup",
-                "Coffin", "Crypt", "Cage", "Tomb",
-                "BossSpawner", "Gravestone", "Statue",
-                "Interactable", "Interactive"
+                "ShadyGuy(Clone)", "Merchant(Clone)",
+                // Music
+                "Boombox(Clone)", "Microwave(Clone)",
+                // Others
+                "Coffin(Clone)", "Gift(Clone)", "Gravestone(Clone)"
             };
 
-            foreach (var baseName in baseNames)
+            foreach (var name in priorityNames)
             {
-                // Try multiple naming patterns that Unity uses
-                string[] patterns = {
-                    baseName,
-                    baseName + "(Clone)",
-                    baseName + " (Clone)",
-                };
-
-                // Also try numbered variants (Unity names duplicates this way)
-                for (int i = 1; i <= 20; i++)
-                {
-                    TryFindAndCreateBeacon($"{baseName}(Clone) ({i})", playerPos);
-                    TryFindAndCreateBeacon($"{baseName} (Clone) ({i})", playerPos);
-                    TryFindAndCreateBeacon($"{baseName} ({i})", playerPos);
-                }
-
-                foreach (var pattern in patterns)
-                {
-                    TryFindAndCreateBeacon(pattern, playerPos);
-                }
+                TryFindAndCreateBeacon(name, playerPos);
             }
         }
 
@@ -531,39 +510,116 @@ namespace MegabonkAccess.Components
                 if (obj == null || !obj.activeInHierarchy) return;
 
                 int id = obj.GetInstanceID();
-                if (activeBeacons.ContainsKey(id)) return;
-
-                float distance = Vector3.Distance(playerPos, obj.transform.position);
-                if (distance > detectionRadius) return;
-
-                string type = IdentifyType(objName.ToLower());
-                if (type != "unknown")
+                if (!activeBeacons.ContainsKey(id))
                 {
-                    CreateBeacon(obj, type, id);
-                    Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon: {objName} -> {type} at dist {distance:F0}");
+                    float distance = Vector3.Distance(playerPos, obj.transform.position);
+                    if (distance <= detectionRadius)
+                    {
+                        string type = IdentifyType(objName.ToLower());
+                        if (type != "unknown")
+                        {
+                            CreateBeacon(obj, type, id);
+                            Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon: {objName} -> {type} at dist {distance:F0}");
+                        }
+                    }
+                }
+
+                // NUEVO: Escanear hermanos para encontrar duplicados con el mismo nombre base
+                ScanSiblingsForDuplicates(obj, playerPos);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Escanea los hermanos de un objeto para encontrar TODOS los interactables cercanos.
+        /// Esto incluye duplicados del mismo tipo y otros tipos de interactables.
+        /// </summary>
+        private void ScanSiblingsForDuplicates(GameObject foundObj, Vector3 playerPos)
+        {
+            if (foundObj == null) return;
+
+            try
+            {
+                var parent = foundObj.transform.parent;
+                if (parent == null) return;
+
+                // Escanear todos los hijos del padre - buscar CUALQUIER interactable
+                int childCount = parent.childCount;
+                for (int i = 0; i < childCount; i++)
+                {
+                    try
+                    {
+                        var sibling = parent.GetChild(i);
+                        if (sibling == null || !sibling.gameObject.activeInHierarchy) continue;
+
+                        var siblingObj = sibling.gameObject;
+                        int siblingId = siblingObj.GetInstanceID();
+                        if (activeBeacons.ContainsKey(siblingId) || interactedObjects.Contains(siblingId)) continue;
+
+                        float distance = Vector3.Distance(playerPos, siblingObj.transform.position);
+                        if (distance > detectionRadius) continue;
+
+                        // Verificar si tiene BaseInteractable
+                        var interactable = siblingObj.GetComponent<BaseInteractable>();
+                        if (interactable != null)
+                        {
+                            string type = IdentifyTypeFromInteractable(interactable, siblingObj.name.ToLower());
+                            if (type != "unknown")
+                            {
+                                CreateBeacon(siblingObj, type, siblingId);
+                            }
+                        }
+                        else
+                        {
+                            // Some objects like BossPylon don't inherit from BaseInteractable
+                            // Check by name pattern instead
+                            string lowerName = siblingObj.name.ToLower();
+                            if (lowerName.Contains("pylon") || lowerName.Contains("charge"))
+                            {
+                                string type = IdentifyType(lowerName);
+                                if (type != "unknown")
+                                {
+                                    CreateBeacon(siblingObj, type, siblingId);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
                 }
             }
             catch { }
+        }
 
-            // También buscar por prefijos comunes (sin Clone exacto)
-            string[] prefixes = {
-                "Shrine", "Chest", "Portal", "Pot", "NPC", "Borgor",
-                "Interactable", "Pickup", "Health", "Gold"
-            };
+        /// <summary>
+        /// Extrae el nombre base de un GameObject (sin Clone, números, etc.)
+        /// Ej: "PotSmall(Clone) (2)" -> "PotSmall"
+        /// </summary>
+        private string GetBaseName(string fullName)
+        {
+            if (string.IsNullOrEmpty(fullName)) return "";
 
-            foreach (var prefix in prefixes)
+            string name = fullName;
+
+            // Remover " (N)" al final (duplicados de Unity)
+            int parenIndex = name.LastIndexOf(" (");
+            if (parenIndex > 0)
             {
-                try
+                string afterParen = name.Substring(parenIndex + 2);
+                if (afterParen.Length > 0 && afterParen[afterParen.Length - 1] == ')')
                 {
-                    // Intentar variaciones comunes
-                    var obj = GameObject.Find(prefix);
-                    if (obj != null) ProcessFoundObject(obj, playerPos);
-
-                    obj = GameObject.Find(prefix + "(Clone)");
-                    if (obj != null) ProcessFoundObject(obj, playerPos);
+                    // Verificar si es un número
+                    string numPart = afterParen.Substring(0, afterParen.Length - 1);
+                    if (int.TryParse(numPart, out _))
+                    {
+                        name = name.Substring(0, parenIndex);
+                    }
                 }
-                catch { }
             }
+
+            // Remover "(Clone)" o " (Clone)"
+            name = name.Replace("(Clone)", "").Replace(" (Clone)", "").Trim();
+
+            return name;
         }
 
         // Para logging de jerarquía solo una vez
@@ -847,16 +903,23 @@ namespace MegabonkAccess.Components
         private string IdentifyType(string name)
         {
             if (name.Contains("chest")) return "chest";
-            if (name.Contains("shrine") || name.Contains("moai")) return "shrine";
+            // Shrines including charge shrines and pylons
+            if (name.Contains("shrine") || name.Contains("moai") || name.Contains("charge") || name.Contains("pylon")) return "shrine";
             if (name.Contains("portal")) return "portal";
-            if (name.Contains("borgor") || name.Contains("health")) return "health";
+            if (name.Contains("borgor") || name.Contains("health") || name.Contains("gift")) return "health";
             if (name.Contains("gold") || name.Contains("coin")) return "gold";
             // Vasijas/Pots
             if (name.Contains("pot") || name.Contains("urn") || name.Contains("vase") || name.Contains("jar") || name.Contains("breakable")) return "urn";
             if (name.Contains("music") || name.Contains("jukebox") || name.Contains("boombox") || name.Contains("microwave")) return "music";
-            if (name.Contains("npc") || name.Contains("merchant") || name.Contains("shop") || name.Contains("vendor") || name.Contains("shady")) return "npc";
-            // Boss spawner
-            if (name.Contains("boss") || name.Contains("spawner")) return "portal";
+            if (name.Contains("npc") || name.Contains("merchant") || name.Contains("shop") || name.Contains("vendor") || name.Contains("shady") || name.Contains("character")) return "npc";
+            // Boss spawner and special portals
+            if (name.Contains("boss") || name.Contains("spawner") || name.Contains("ghost")) return "portal";
+            // Crypt/Tomb/Coffin - use shrine sound (mysterious)
+            if (name.Contains("crypt") || name.Contains("coffin") || name.Contains("tomb") || name.Contains("grave") || name.Contains("statue") || name.Contains("skeleton")) return "shrine";
+            // Cages - use default
+            if (name.Contains("cage") || name.Contains("unlock")) return "default";
+            // Environmental interactables
+            if (name.Contains("tumbleweed") || name.Contains("bananarang")) return "default";
             if (name.Contains("interactable")) return "default";
             return "unknown";
         }
@@ -1021,142 +1084,70 @@ namespace MegabonkAccess.Components
 
         private bool IsMenuOpen()
         {
-            // Check if game is paused (pause menu, any modal dialog)
+            // OPTIMIZED: Only use fast checks, no GameObject.Find() spam
+
+            // 1. TimeScale check - very fast, catches pause menu
             if (Time.timeScale < 0.1f)
             {
-                Plugin.Log.LogDebug($"[DirectionalAudio] Menu detected: TimeScale={Time.timeScale}");
                 return true;
             }
 
-            // Check MenuStateTracker flags (for upgrade/chest menus)
+            // 2. Chest animation check - instant flag check
+            if (ChestAnimationTracker.IsChestAnimationPlaying)
+            {
+                return true;
+            }
+
+            // 3. MenuStateTracker - our own flag, instant check
             if (MenuStateTracker.IsAnyMenuOpen)
             {
-                Plugin.Log.LogDebug("[DirectionalAudio] Menu detected: MenuStateTracker");
                 return true;
             }
 
-            // Check if Player object exists and is active
-            try
-            {
-                var player = GameObject.Find("Player");
-                if (player == null || !player.activeInHierarchy)
-                {
-                    Plugin.Log.LogDebug("[DirectionalAudio] Menu detected: Player not found/inactive");
-                    return true;
-                }
-            }
-            catch { }
-
-
-            // Check for DeathCamera directly (death animation)
-            try
-            {
-                var deathCam = GameObject.Find("DeathCamera");
-                if (deathCam != null && deathCam.activeInHierarchy)
-                {
-                    var camComponent = deathCam.GetComponent<Camera>();
-                    if (camComponent != null && camComponent.enabled)
-                    {
-                        Plugin.Log.LogDebug("[DirectionalAudio] Animation detected: DeathCamera active");
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            // Check Camera.main - log what it is for debugging
-            try
-            {
-                var mainCam = Camera.main;
-                if (mainCam != null)
-                {
-                    string camName = mainCam.gameObject.name;
-                    // If it's DeathCamera or any camera other than the main gameplay camera
-                    if (camName.Contains("Death") || camName.Contains("death"))
-                    {
-                        Plugin.Log.LogDebug($"[DirectionalAudio] Menu detected: Camera is {camName}");
-                        return true;
-                    }
-                }
-                else
-                {
-                    // No main camera - probably in a menu/transition
-                    Plugin.Log.LogDebug("[DirectionalAudio] Menu detected: No main camera");
-                    return true;
-                }
-            }
-            catch { }
-
-            // Check for death/stats screens and item windows
-            // NOTE: "DeathScreen" and "DeathPanel" removed - they always exist (just hidden)
-            // We detect death via the DeathCamera check above
-            try
-            {
-                string[] menuWindowNames = {
-                    // Death/Stats screens (only ones that are actually destroyed/created dynamically)
-                    "StatsScreen", "DeathStats", "RunStats", "EndScreen", "EndRunScreen",
-                    "GameOverScreen", "GameOver", "ResultScreen", "ResultsScreen",
-                    "RunEndScreen", "RunEnd", "ScoreScreen", "FinalStats", "RunSummary", "Summary",
-                    // Item windows
-                    "ItemWindow", "ItemWindowUi", "RewardWindow", "RewardPanel",
-                    "LootWindow", "LootPanel", "PickupWindow", "ItemPickup",
-                    "ChestReward", "ChestItem", "ItemPanel"
-                };
-
-                foreach (var windowName in menuWindowNames)
-                {
-                    var window = GameObject.Find(windowName);
-                    if (window != null && window.activeInHierarchy)
-                    {
-                        Plugin.Log.LogDebug($"[DirectionalAudio] Menu detected: {windowName}");
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            // Check for death-specific buttons that only appear when death screen is visible
-            try
-            {
-                string[] deathButtons = {
-                    "ContinueButton", "Continue", "RestartButton", "Restart",
-                    "RetryButton", "Retry", "MainMenuButton", "MainMenu",
-                    "QuitButton", "StatsButton", "NextButton", "ProceedButton",
-                    "SkipButton", "EndRunButton", "ViewStatsButton"
-                };
-
-                foreach (var buttonName in deathButtons)
-                {
-                    var btn = GameObject.Find(buttonName);
-                    if (btn != null && btn.activeInHierarchy)
-                    {
-                        Plugin.Log.LogDebug($"[DirectionalAudio] Menu detected: Death button - {buttonName}");
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            // Check for EventSystem - if it has a selected object, a UI is focused
+            // 3. EventSystem check - fast, catches any focused UI
             try
             {
                 var eventSystem = UnityEngine.EventSystems.EventSystem.current;
                 if (eventSystem != null && eventSystem.currentSelectedGameObject != null)
                 {
-                    string selectedName = eventSystem.currentSelectedGameObject.name.ToLower();
-                    // If a button or UI element is selected, we're probably in a menu
-                    // Including death-related buttons
-                    if (selectedName.Contains("button") || selectedName.Contains("resume") ||
-                        selectedName.Contains("quit") || selectedName.Contains("option") ||
-                        selectedName.Contains("setting") || selectedName.Contains("pause") ||
-                        selectedName.Contains("take") || selectedName.Contains("leave") ||
-                        selectedName.Contains("discard") || selectedName.Contains("banish") ||
-                        selectedName.Contains("continue") || selectedName.Contains("restart") ||
-                        selectedName.Contains("retry") || selectedName.Contains("stats") ||
-                        selectedName.Contains("menu") || selectedName.Contains("skip") ||
-                        selectedName.Contains("next") || selectedName.Contains("proceed"))
+                    // Any UI element selected = menu is open
+                    return true;
+                }
+            }
+            catch { }
+
+            // 4. Camera.main check - Unity caches this, fairly fast
+            try
+            {
+                var mainCam = Camera.main;
+                if (mainCam == null)
+                {
+                    return true; // No camera = probably in transition/menu
+                }
+                // Check if it's the death camera
+                if (mainCam.gameObject.name.Contains("Death"))
+                {
+                    return true;
+                }
+            }
+            catch { }
+
+            // 5. DeathCamera check - cached reference, searched periodically
+            try
+            {
+                // Search for DeathCamera periodically (every 0.5s)
+                if (Time.time >= nextDeathCameraSearchTime)
+                {
+                    cachedDeathCamera = GameObject.Find("DeathCamera");
+                    nextDeathCameraSearchTime = Time.time + 0.5f;
+                }
+
+                // Check if cached DeathCamera is active and enabled
+                if (cachedDeathCamera != null && cachedDeathCamera.activeInHierarchy)
+                {
+                    var camComponent = cachedDeathCamera.GetComponent<Camera>();
+                    if (camComponent != null && camComponent.enabled)
                     {
-                        Plugin.Log.LogDebug($"[DirectionalAudio] Menu detected: UI selected - {selectedName}");
                         return true;
                     }
                 }
@@ -1308,6 +1299,35 @@ namespace MegabonkAccess.Components
                             toRemove.Add(kvp.Key);
                             Plugin.Log.LogDebug($"[DirectionalAudio] Removed beacon for destroyed object: {beacon.Type}");
                             continue;
+                        }
+
+                        // Verificar si el interactable ya no puede ser interactuado (fue usado)
+                        // Esto captura casos como BossSpawner que permanece activo pero ya fue usado
+                        if (!beacon.Type.StartsWith("pickup_"))
+                        {
+                            var interactable = beacon.Target.GetComponent<BaseInteractable>();
+                            if (interactable != null)
+                            {
+                                try
+                                {
+                                    if (!interactable.CanInteract())
+                                    {
+                                        // El interactable ya no puede ser usado, eliminar beacon
+                                        if (beacon.AudioObject != null)
+                                        {
+                                            UnityEngine.Object.Destroy(beacon.AudioObject);
+                                        }
+                                        if (!string.IsNullOrEmpty(beacon.PosKey))
+                                        {
+                                            activePositions.Remove(beacon.PosKey);
+                                        }
+                                        toRemove.Add(kvp.Key);
+                                        Plugin.Log.LogDebug($"[DirectionalAudio] Removed beacon for used interactable: {beacon.Type}");
+                                        continue;
+                                    }
+                                }
+                                catch { } // CanInteract puede fallar, ignorar
+                            }
                         }
                     }
                     catch

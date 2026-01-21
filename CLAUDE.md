@@ -60,7 +60,7 @@ Accessibility is implemented as an **additional layer**, without altering the co
 
 #### Directional Audio Beacons
 
-**Status:** Partially working with known bugs
+**Status:** Functional
 
 ##### Implemented Features
 - 3D spatialized audio beacons for interactables
@@ -69,20 +69,25 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - Scene change cleanup
 - 4-second delay after scene load (skip intro cinematic)
 - Beacons removed after interaction (BaseInteractable.Interact patch)
+- Beacons removed when `CanInteract()` returns false (catches used objects)
+- Sibling scanning: finds ALL interactables in same container (duplicates)
+- Support for ChargeShrine and BossPylon (stand-on-to-charge objects)
 
 ##### Menu Detection (sounds pause during menus)
-Working detection methods:
+Optimized detection methods (no `GameObject.Find()` spam):
 - `Time.timeScale < 0.1f` - Pause menu
+- `ChestAnimationTracker.IsChestAnimationPlaying` - Chest opening animation
 - `MenuStateTracker.IsAnyMenuOpen` - Upgrade/chest menus via button detection
-- `DeathCamera` active and enabled - Death sequence
 - `EventSystem.currentSelectedGameObject` - UI focus detection
-- Death buttons: "ContinueButton", "RestartButton", "StatsButton", etc.
+- `Camera.main` name contains "Death" - Death sequence
+- Cached `DeathCamera` reference (searched every 0.5s, not every frame)
 
-##### Known Bugs (TODO)
-1. **Multiple objects with same name**: `GameObject.Find()` only returns first match. Objects like multiple pots only get beacons after hover detection, not proactive scan.
-2. **Chest opening animation**: Beacons still play during chest open animation
-3. **Some interactables don't remove beacons**: Boss summoner and others persist after use
-4. **Object naming inconsistencies**: Game uses both "ShrineCursed" and "CursedShrine" patterns
+##### Fixed Bugs
+1. **Multiple objects with same name**: `ScanSiblingsForDuplicates()` now scans ALL children of parent container
+2. **Chest opening animation**: `ChestAnimationTracker` flag set by patches on `Open()`, `OpenButton()`, cleared on `OpeningFinished()`
+3. **Interactables not removing beacons**: `CleanupBeacons()` checks `CanInteract()` - removes beacon if false
+4. **Object naming inconsistencies**: Both patterns supported, `IdentifyType()` handles variations
+5. **Performance issues**: Reduced `GameObject.Find()` calls from ~3000 to ~20 per scan cycle
 
 ---
 
@@ -144,11 +149,15 @@ Portal
 ### Patches
 - `BaseInteractablePatch.cs` - Hover announcements + beacon registration + interaction removal
 - `UpgradeButtonPatch.cs` - Level-up menu + MenuStateTracker
-- `ChestWindowUiPatch.cs` - Chest contents announcement
+- `ChestWindowUiPatch.cs` - Chest contents announcement + ChestAnimationTracker
 - `EncounterButtonPatch.cs` - Shrine options
 
 ### Components
-- `DirectionalAudioManager.cs` - 3D audio beacon system
+- `DirectionalAudioManager.cs` - 3D audio beacon system (optimized)
+
+### State Trackers
+- `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus
+- `ChestAnimationTracker` (in ChestWindowUiPatch.cs) - Detects chest opening animation
 
 ---
 

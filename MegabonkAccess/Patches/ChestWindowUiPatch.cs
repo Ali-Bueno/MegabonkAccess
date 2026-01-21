@@ -8,6 +8,42 @@ using TMPro;
 namespace MegabonkAccess
 {
     /// <summary>
+    /// Tracks chest opening animation state for DirectionalAudioManager.
+    /// </summary>
+    public static class ChestAnimationTracker
+    {
+        public static bool IsChestAnimationPlaying { get; set; } = false;
+    }
+
+    /// <summary>
+    /// Patch for ChestWindowUi.Open to detect when chest window opens.
+    /// </summary>
+    [HarmonyPatch(typeof(ChestWindowUi), "Open")]
+    public static class ChestWindowUi_Open_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            ChestAnimationTracker.IsChestAnimationPlaying = true;
+            Plugin.Log.LogInfo("[ChestWindowUi] Chest window opened - animation started");
+        }
+    }
+
+    /// <summary>
+    /// Patch for ChestWindowUi.OpenButton to detect when chest animation starts.
+    /// </summary>
+    [HarmonyPatch(typeof(ChestWindowUi), "OpenButton")]
+    public static class ChestWindowUi_OpenButton_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            ChestAnimationTracker.IsChestAnimationPlaying = true;
+            Plugin.Log.LogInfo("[ChestWindowUi] Chest opening animation started");
+        }
+    }
+
+    /// <summary>
     /// Patch for ChestWindowUi to announce chest contents when opening.
     /// Hooks OpeningFinished which is called when the chest reveals its item.
     /// </summary>
@@ -28,6 +64,10 @@ namespace MegabonkAccess
         [HarmonyPostfix]
         public static void Postfix(ChestWindowUi __instance)
         {
+            // Animation finished - clear the flag
+            ChestAnimationTracker.IsChestAnimationPlaying = false;
+            Plugin.Log.LogInfo("[ChestWindowUi] Chest animation finished");
+
             if (__instance == null) return;
 
             try
