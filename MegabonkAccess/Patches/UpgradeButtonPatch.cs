@@ -89,6 +89,7 @@ namespace MegabonkAccess
     public static class UpgradeButton_StartHover_Patch
     {
         private static string lastAnnouncement = "";
+        private static float lastAnnouncementTime = 0f;
 
         [HarmonyPostfix]
         public static void Postfix(UpgradeButton __instance)
@@ -99,7 +100,7 @@ namespace MegabonkAccess
             {
                 // Find all TextMeshProUGUI components in children
                 var allTexts = GetAllTextComponents(__instance.transform);
-                
+
                 if (allTexts.Count == 0)
                 {
                     Plugin.Log.LogWarning("UpgradeButton: No text components found");
@@ -111,27 +112,33 @@ namespace MegabonkAccess
                 foreach (var tmp in allTexts)
                 {
                     if (tmp == null) continue;
-                    
+
                     string text = SanitizeText(tmp.text);
                     if (string.IsNullOrEmpty(text)) continue;
-                    
+
                     // Skip very short texts (like "Lvl")
                     if (text.Length < 3) continue;
-                    
+
                     // Skip known labels/tags that don't add value
                     string textLower = text.ToLower();
-                    if (textLower == "new" || textLower == "nuevo" || textLower == "lvl" || 
+                    if (textLower == "new" || textLower == "nuevo" || textLower == "lvl" ||
                         textLower == "level" || textLower == "nivel") continue;
-                    
+
                     sb.Append(text).Append(". ");
                 }
 
                 string result = sb.ToString();
-                
-                // Only speak if we have content AND it's different from last announcement
-                if (!string.IsNullOrEmpty(result) && result != lastAnnouncement)
+
+                // Speak if we have content
+                // Allow re-reading same content after 0.3s (moved to different button and back)
+                float currentTime = UnityEngine.Time.unscaledTime;
+                bool isDifferent = result != lastAnnouncement;
+                bool enoughTimePassed = (currentTime - lastAnnouncementTime) > 0.3f;
+
+                if (!string.IsNullOrEmpty(result) && (isDifferent || enoughTimePassed))
                 {
                     lastAnnouncement = result;
+                    lastAnnouncementTime = currentTime;
                     Plugin.Log.LogInfo($"UpgradeButton speaking: {result}");
                     TolkUtil.Speak(result);
                 }

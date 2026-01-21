@@ -13,6 +13,32 @@ namespace MegabonkAccess
         {
             if (__instance == null) return;
 
+            // Skip if a specialized patch recently spoke
+            if (TolkUtil.ShouldSkipGenericPatch())
+            {
+                return;
+            }
+
+            // Check if we're in a specialized menu WINDOW (not just any button with these names)
+            Transform parent = __instance.transform;
+
+            // Walk up the hierarchy to check for specialized menu WINDOWS (not main menu buttons)
+            for (int i = 0; i < 10 && parent != null; i++)
+            {
+                string parentName = parent.name ?? "";
+                // Only skip if we're inside an actual window, not a main menu button
+                if (parentName == "ShopWindow" ||
+                    parentName == "UnlocksWindow" ||
+                    parentName == "CharacterSelectWindow" ||
+                    parentName == "CharacterSelect" ||
+                    parentName.Contains("Window") && (parentName.Contains("Shop") || parentName.Contains("Unlock") || parentName.Contains("Character")))
+                {
+                    Plugin.Log.LogDebug($"ButtonNavigation: SKIPPING - in specialized window: {parentName}");
+                    return;
+                }
+                parent = parent.parent;
+            }
+
             string textToSpeak = "";
 
             // Try to find text in the 'text' field
@@ -36,6 +62,7 @@ namespace MegabonkAccess
             // If found, speak it
             if (!string.IsNullOrEmpty(textToSpeak))
             {
+                Plugin.Log.LogDebug($"ButtonNavigation speaking: {textToSpeak}");
                 TolkUtil.Speak(textToSpeak);
             }
         }

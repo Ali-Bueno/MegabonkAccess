@@ -10,8 +10,8 @@ namespace MegabonkAccess
     [HarmonyPatch(typeof(CharacterInfoUI), "OnCharacterSelected")]
     public static class CharacterInfoUI_OnCharacterSelected_Patch
     {
-        // Cache to prevent duplicate announcements
         private static string lastAnnouncement = "";
+        private static float lastAnnouncementTime = 0f;
 
         // Texts to skip (button labels, etc)
         private static readonly HashSet<string> SkipTexts = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase)
@@ -26,11 +26,22 @@ namespace MegabonkAccess
         {
             if (__instance == null) return;
 
+            // Store reference for delayed reading
+            var instanceRef = __instance;
+
+            // Schedule the reading after a short delay to allow UI to update
+            TolkUtil.ScheduleDelayedAction(() => ReadCharacterInfo(instanceRef));
+        }
+
+        private static void ReadCharacterInfo(CharacterInfoUI instance)
+        {
+            if (instance == null) return;
+
             try
             {
                 // Find all TextMeshProUGUI components in children
-                var allTexts = GetAllTextComponents(__instance.transform);
-                
+                var allTexts = GetAllTextComponents(instance.transform);
+
                 if (allTexts.Count == 0)
                 {
                     return;
@@ -41,35 +52,41 @@ namespace MegabonkAccess
                 foreach (var tmp in allTexts)
                 {
                     if (tmp == null) continue;
-                    
+
                     string text = SanitizeText(tmp.text);
                     if (string.IsNullOrEmpty(text)) continue;
-                    
+
                     // Skip if it's a known button/label
                     if (SkipTexts.Contains(text)) continue;
-                    
+
                     // Skip very short texts (likely labels)
                     if (text.Length < 4) continue;
-                    
+
                     // Skip texts that are mostly numbers or progress
                     if (IsProgressOrNumber(text)) continue;
-                    
+
                     // Skip texts with garbage patterns like "sds sdd"
                     if (HasGarbagePattern(text)) continue;
-                    
+
                     // Skip if it looks like a challenge description
                     if (IsLikelyChallengeText(text)) continue;
-                    
+
                     sb.Append(text).Append(". ");
                 }
 
                 string result = sb.ToString();
-                
-                // Only speak if we have content AND it's different from last announcement
-                if (!string.IsNullOrEmpty(result) && result != lastAnnouncement)
+
+                // Allow re-reading after 0.3s
+                float currentTime = UnityEngine.Time.unscaledTime;
+                bool isDifferent = result != lastAnnouncement;
+                bool enoughTimePassed = (currentTime - lastAnnouncementTime) > 0.3f;
+
+                if (!string.IsNullOrEmpty(result) && (isDifferent || enoughTimePassed))
                 {
                     lastAnnouncement = result;
-                    TolkUtil.Speak(result);
+                    lastAnnouncementTime = currentTime;
+                    Plugin.Log.LogInfo($"CharacterInfoUI speaking: {result}");
+                    TolkUtil.SpeakFromSpecializedPatch(result);
                 }
             }
             catch (System.Exception e)

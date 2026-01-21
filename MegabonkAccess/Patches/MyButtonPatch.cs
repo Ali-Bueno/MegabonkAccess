@@ -42,18 +42,48 @@ namespace MegabonkAccess
         {
             if (__instance == null) return;
 
-            // Ignore Character Buttons (handled by separate patch)
-            if (__instance.GetType().Name == "MyButtonCharacter" || __instance is MyButtonCharacter)
+            // Skip if a specialized patch recently spoke
+            if (TolkUtil.ShouldSkipGenericPatch())
             {
                 return;
+            }
+
+            // Ignore buttons handled by separate patches
+            string typeName = __instance.GetType().Name;
+            string objName = __instance.name ?? "";
+
+            // Log for debugging
+            Plugin.Log.LogDebug($"MyButton_OnSelect: type={typeName}, name={objName}");
+
+            // Skip if it's a specialized button type (check by type name since IL2CPP 'is' can be unreliable)
+            if (typeName == "MyButtonCharacter" ||
+                typeName == "MyButtonShop" ||
+                typeName == "MyButtonUnlock")
+            {
+                Plugin.Log.LogDebug($"MyButton_OnSelect: SKIPPING specialized button type={typeName}");
+                return;
+            }
+
+            // Also skip if we're inside a specialized window (shop, unlock, character select)
+            Transform parent = __instance.transform;
+            for (int i = 0; i < 15 && parent != null; i++)
+            {
+                string parentName = parent.name ?? "";
+                if (parentName.Contains("ShopWindow") ||
+                    parentName.Contains("UnlocksWindow") ||
+                    parentName.Contains("UnlocksUi") ||
+                    parentName.Contains("CharacterSelect"))
+                {
+                    Plugin.Log.LogDebug($"MyButton_OnSelect: SKIPPING - inside window: {parentName}");
+                    return;
+                }
+                parent = parent.parent;
             }
 
             string textToSpeak = "";
 
             try
             {
-                string typeName = __instance.GetType().Name;
-                
                 if (typeName == "UpgradeButton")
                 {
                     textToSpeak = GetUpgradeButtonText(__instance);

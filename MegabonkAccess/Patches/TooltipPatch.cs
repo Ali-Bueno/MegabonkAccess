@@ -3,31 +3,61 @@ using UnityEngine;
 
 namespace MegabonkAccess
 {
+    /// <summary>
+    /// Patch for TooltipNew to announce tooltip text when shown.
+    /// This catches ALL tooltips in the game (items, abilities, stats, etc.)
+    /// </summary>
     [HarmonyPatch(typeof(TooltipNew), "Set")]
     public static class TooltipNew_Set_Patch
     {
+        private static string lastTooltip = "";
+        private static float lastTooltipTime = 0f;
+
         [HarmonyPostfix]
         public static void Postfix(string text)
         {
-            if (!string.IsNullOrEmpty(text))
+            if (string.IsNullOrEmpty(text)) return;
+
+            // Skip if a specialized patch recently spoke
+            if (TolkUtil.ShouldSkipGenericPatch())
             {
-                // TolkUtil.Speak ensures it interrupts properly if configured, 
-                // but here we might want to let the button name finish?
-                // Usually Speak() interrupts. 
-                // If Tooltip appears immediately after button select, it might cut off the button name.
-                // But Tooltips usually appear on Hover. 
-                // Does "Set" get called on Controller select? 
-                // If the game uses mouse simulation for controller, yes.
-                
-                // Let's assume it works.
-                TolkUtil.Speak(SanitizeText(text));
+                return;
+            }
+
+            try
+            {
+                // Clean the text
+                string cleanText = SanitizeText(text);
+                if (string.IsNullOrEmpty(cleanText)) return;
+
+                // Avoid repeating the same tooltip too quickly (within 0.5s)
+                // But allow re-reading if enough time has passed
+                float currentTime = Time.unscaledTime;
+                if (cleanText == lastTooltip && (currentTime - lastTooltipTime) < 0.5f)
+                {
+                    return;
+                }
+
+                lastTooltip = cleanText;
+                lastTooltipTime = currentTime;
+
+                Plugin.Log.LogInfo($"Tooltip speaking: {cleanText}");
+                TolkUtil.Speak(cleanText);
+            }
+            catch (System.Exception e)
+            {
+                Plugin.Log.LogError($"Tooltip patch error: {e.Message}");
             }
         }
 
         private static string SanitizeText(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
+            // Remove rich text tags
             string result = System.Text.RegularExpressions.Regex.Replace(text, "<.*?>", string.Empty);
+            // Remove newlines and excessive whitespace
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"[\r\n]+", " ");
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ");
             return result.Trim();
         }
     }

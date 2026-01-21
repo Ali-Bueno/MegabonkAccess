@@ -18,7 +18,7 @@ Accessibility is implemented as an **additional layer**, without altering the co
 ### Mod Code
 - `MegabonkAccess/` - Main BepInEx plugin
   - `Plugin.cs` - Entry point
-  - `TolkUtil.cs` - Screen reader wrapper
+  - `TolkUtil.cs` - Screen reader wrapper + coordination system
   - `Patches/` - Harmony patches for game hooks
   - `Components/` - Custom Unity components (DirectionalAudioManager)
 
@@ -43,7 +43,9 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - [x] **Main Menu**: Title and navigation announced
 - [x] **Button Navigation**: Reads button text (Play, Settings, etc.)
 - [x] **Settings Menu**: Reads new values when changing options
-- [x] **Character selection**: Reads character name, description, weapon, passive abilities
+- [x] **Character selection**: Reads character name, description, weapon, passive (with delayed speech)
+- [x] **Shop menu**: Reads item info via ShopFooter.Set patch (with delayed speech)
+- [x] **Unlocks menu**: Reads unlock info via UnlocksFooter.OnUnlockSelected patch (with delayed speech)
 - [x] **Level-up item selection**: (UpgradeButton) reads item name, description, rarity
 - [x] **Chest menu**: (ChestWindowUi) announces chest contents when opened
 - [x] **Shrine encounters**: (EncounterButton) reads options and rarities
@@ -52,7 +54,6 @@ Accessibility is implemented as an **additional layer**, without altering the co
 #### Pending
 - [ ] **Settings Menu - State Reading**: Current value on focus (IL2CPP issues)
 - [ ] **Meta-progression / upgrades**: Not implemented
-- [ ] **Pause menu accessibility**: Basic detection works
 
 ---
 
@@ -60,7 +61,7 @@ Accessibility is implemented as an **additional layer**, without altering the co
 
 #### Directional Audio Beacons
 
-**Status:** Functional
+**Status:** Functional with known issues
 
 ##### Implemented Features
 - 3D spatialized audio beacons for interactables
@@ -71,23 +72,50 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - Beacons removed after interaction (BaseInteractable.Interact patch)
 - Beacons removed when `CanInteract()` returns false (catches used objects)
 - Sibling scanning: finds ALL interactables in same container (duplicates)
-- Support for ChargeShrine and BossPylon (stand-on-to-charge objects)
+- Proactive scanning: searches for objects by name patterns (Portal, Chest, Shrine, Pot, etc.)
+- Container scanning: searches common container objects for interactables
 
 ##### Menu Detection (sounds pause during menus)
-Optimized detection methods (no `GameObject.Find()` spam):
-- `Time.timeScale < 0.1f` - Pause menu
+Detection methods in `IsMenuOpen()`:
+- `Time.timeScale < 0.1f` - Pause menu (game frozen)
+- Pause menu objects: `PauseMenu`, `Pause`, `B_Resume`, etc.
+- `ChestAnimationTracker.IsChestWindowOpen` - Entire chest window duration
 - `ChestAnimationTracker.IsChestAnimationPlaying` - Chest opening animation
-- `MenuStateTracker.IsAnyMenuOpen` - Upgrade/chest menus via button detection
-- `EventSystem.currentSelectedGameObject` - UI focus detection
-- `Camera.main` name contains "Death" - Death sequence
-- Cached `DeathCamera` reference (searched every 0.5s, not every frame)
+- `MenuStateTracker.IsAnyMenuOpen` - Upgrade buttons, reward windows
+- Cached `DeathCamera` reference (searched every 0.5s) - Death sequence
+- Death buttons: `B_Continue`, `ContinueButton`, `RestartButton`, `StatsButton`
+
+##### Known Issues / TODO
+1. **Gold chests (cost 30 gold)**: Beacon only starts after hover, not proactively. `GameObject.Find("Chest(Clone)")` finds the chest but beacon doesn't play until hover triggers `RegisterDiscoveredInteractable()`. Need investigation.
 
 ##### Fixed Bugs
-1. **Multiple objects with same name**: `ScanSiblingsForDuplicates()` now scans ALL children of parent container
-2. **Chest opening animation**: `ChestAnimationTracker` flag set by patches on `Open()`, `OpenButton()`, cleared on `OpeningFinished()`
-3. **Interactables not removing beacons**: `CleanupBeacons()` checks `CanInteract()` - removes beacon if false
-4. **Object naming inconsistencies**: Both patterns supported, `IdentifyType()` handles variations
-5. **Performance issues**: Reduced `GameObject.Find()` calls from ~3000 to ~20 per scan cycle
+1. **UI reading previous item**: Added delayed speech system (`ScheduleDelayedAction`) - waits 150ms for UI to update before reading
+2. **Generic patches interrupting specialized**: Coordination system (`SpeakFromSpecializedPatch`, `ShouldSkipGenericPatch`) blocks generic patches for 0.5s after specialized patch speaks
+3. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch, not just animation
+4. **Beacons during pause menu**: Added specific pause menu object detection
+5. **Beacons during death**: Restored `DeathCamera` check + death button detection
+
+---
+
+## TolkUtil Coordination System
+
+### Purpose
+Prevents generic patches (MyButtonPatch, ButtonPatch, TooltipPatch) from interrupting specialized patches (CharacterInfoUI, Shop, Unlock).
+
+### Methods
+- `SpeakFromSpecializedPatch(text)` - Speaks and sets timestamp
+- `ShouldSkipGenericPatch()` - Returns true if specialized patch spoke within 0.5s
+- `ScheduleDelayedAction(action, delay)` - Schedules action for later (UI update timing)
+- `ProcessDelayedSpeech()` - Called from DirectionalAudioManager.Update()
+
+### Usage Pattern
+```csharp
+// In specialized patch (e.g., CharacterInfoUIPatch)
+TolkUtil.ScheduleDelayedAction(() => ReadCharacterInfo(instance));
+
+// In generic patch (e.g., MyButtonPatch)
+if (TolkUtil.ShouldSkipGenericPatch()) return;
+```
 
 ---
 
@@ -98,19 +126,20 @@ Optimized detection methods (no `GameObject.Find()` spam):
 - `Scene.GetRootGameObjects()` - "Method not found"
 - `OnEnable()` / `OnDisable()` patches - Not exposed
 - Generic method patches in some cases
+- `is` operator for type checking (unreliable) - use `GetType().Name` instead
 
 ### Workarounds used:
 - `GameObject.Find(name)` for specific object names
 - Component search via `GetComponent<T>()` on known objects
 - Name-based pattern matching with Clone variants
 - `ClassInjector.RegisterTypeInIl2Cpp<T>()` for custom MonoBehaviours
+- String type name comparison instead of `is` operator
 
 ### Object Naming Patterns
 Unity clone naming conventions to search:
 - `ObjectName`
 - `ObjectName(Clone)`
-- `ObjectName (Clone)`
-- `ObjectName(Clone) (1)`, `(2)`, etc.
+- `ObjectName (Clone)` (with space)
 
 ---
 
@@ -119,28 +148,29 @@ Unity clone naming conventions to search:
 ### Menu State Detection
 Objects that ALWAYS exist (can't use for detection):
 - `DeathScreen` - Always active, just hidden
-- `DeathCamera` component - Always enabled
+- `DeathCamera` component - Check if Camera component is enabled
 
 Objects/states that work for detection:
-- `DeathCamera` as `Camera.main` - Only during death
-- Death buttons appearing (ContinueButton, etc.)
+- `DeathCamera` with enabled Camera component
+- Death buttons appearing (B_Continue, etc.)
 - `Time.timeScale` changes
-- `EventSystem.currentSelectedGameObject` focus
+- Specific menu panel objects
 
-### Interactable Object Names (from logs)
-```
-CursedShrine(Clone)
-PotSmall(Clone)
-PotSmallSilver(Clone)
-Portal
-```
+### Proactive Object Scanning
+Objects found proactively by `ScanRootObjectsByName()`:
+- Portal, Chest, BossSpawner
+- ChargeShrine, Shrine variants
+- PotSmall, PotSmallSilver
+- Microwave, Boombox (music)
 
-### Audio Clips Available (from AudioManager children)
-- Gold sound
-- Silver sound
-- Bullseye sound
-- XP sound
-- Dungeon door (removed - confusing at start)
+Objects only found via hover (need fix):
+- Some gold chests (cost gold to open)
+
+### Garbage Text in Game
+The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Use `RemoveGarbageText()` regex to clean:
+```csharp
+Regex.Replace(text, @"\s+[fsde]+(\s+[fsde]+)+\s*$", "", RegexOptions.IgnoreCase);
+```
 
 ---
 
@@ -148,16 +178,21 @@ Portal
 
 ### Patches
 - `BaseInteractablePatch.cs` - Hover announcements + beacon registration + interaction removal
+- `ButtonPatch.cs` - ButtonNavigationBackdropAndText selection (with skip check)
+- `MyButtonPatch.cs` - Generic MyButton selection (with skip check + type filtering)
+- `TooltipPatch.cs` - Tooltip announcements (with skip check)
+- `CharacterInfoUIPatch.cs` - Character selection (delayed speech)
+- `ShopPatch.cs` - Shop footer (delayed speech)
+- `UnlockPatch.cs` - Unlock footer (delayed speech)
 - `UpgradeButtonPatch.cs` - Level-up menu + MenuStateTracker
-- `ChestWindowUiPatch.cs` - Chest contents announcement + ChestAnimationTracker
-- `EncounterButtonPatch.cs` - Shrine options
+- `ChestWindowUiPatch.cs` - Chest contents + ChestAnimationTracker + window open/close
 
 ### Components
-- `DirectionalAudioManager.cs` - 3D audio beacon system (optimized)
+- `DirectionalAudioManager.cs` - 3D audio beacon system
 
 ### State Trackers
-- `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus
-- `ChestAnimationTracker` (in ChestWindowUiPatch.cs) - Detects chest opening animation
+- `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search
+- `ChestAnimationTracker` (in ChestWindowUiPatch.cs) - Tracks chest window state
 
 ---
 
@@ -177,3 +212,4 @@ Auto-copies to: `D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\`
 - This is an IL2CPP game (Unity 2023.2.22f1)
 - Screen reader support requires Tolk.dll in game root folder
 - Test with BepInEx console or LogOutput.log for debugging
+- Decompiled game code in `megabonk code/` folder for reference

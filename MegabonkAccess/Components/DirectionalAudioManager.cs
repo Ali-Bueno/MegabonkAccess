@@ -117,6 +117,9 @@ namespace MegabonkAccess.Components
         {
             try
             {
+                // Process any pending delayed speech (must run every frame)
+                TolkUtil.ProcessDelayedSpeech();
+
                 // Check for scene change and clear beacons if needed
                 CheckSceneChange();
 
@@ -472,59 +475,77 @@ namespace MegabonkAccess.Components
 
         private void ScanRootObjectsByName(Vector3 playerPos)
         {
-            // OPTIMIZED: Only search for common names, rely on ScanSiblingsForDuplicates
-            // to find duplicates. No numbered variants - siblings scan handles that.
-            string[] priorityNames = {
+            // Base names to search - we'll add Clone variations automatically
+            string[] baseNames = {
                 // Most important - unique objects
-                "Portal", "Portal(Clone)",
-                "Chest", "Chest(Clone)",
-                "BossSpawner", "BossSpawner(Clone)",
-                // Shrines (just base patterns)
-                "Shrine", "ShrineCursed(Clone)", "ShrineGreed(Clone)",
-                "ShrineMoai(Clone)", "ShrineBalance(Clone)",
-                // Charge shrines / Pylons (stand on to charge)
-                "ChargeShrine", "ChargeShrine(Clone)",
-                "BossPylon", "BossPylon(Clone)",
-                "Pylon", "Pylon(Clone)",
-                // Pots - just one, siblings will find the rest
-                "PotSmall(Clone)", "PotSmallSilver(Clone)",
+                "Portal", "Chest", "BossSpawner",
+                // Shrines
+                "Shrine", "ShrineCursed", "ShrineGreed", "ShrineMoai", "ShrineBalance",
+                "CursedShrine", "GreedShrine", "MoaiShrine", "BalanceShrine",
+                "ChallengeShrine",
+                // Charge shrines / Pylons
+                "ChargeShrine", "BossPylon", "Pylon",
+                // Pots/Urns
+                "PotSmall", "PotSmallSilver", "Pot", "Urn", "Vase",
                 // NPCs
-                "ShadyGuy(Clone)", "Merchant(Clone)",
+                "ShadyGuy", "Merchant", "NPC", "Shopkeeper",
                 // Music
-                "Boombox(Clone)", "Microwave(Clone)",
+                "Boombox", "Microwave", "Jukebox",
                 // Others
-                "Coffin(Clone)", "Gift(Clone)", "Gravestone(Clone)"
+                "Coffin", "Gift", "Gravestone", "Tombstone"
             };
 
-            foreach (var name in priorityNames)
+            foreach (var baseName in baseNames)
             {
-                TryFindAndCreateBeacon(name, playerPos);
+                // Try all naming variations Unity uses
+                TryFindAndCreateBeacon(baseName, playerPos);
+                TryFindAndCreateBeacon(baseName + "(Clone)", playerPos);
+                TryFindAndCreateBeacon(baseName + " (Clone)", playerPos);  // With space
             }
         }
+
+        // Counter to limit chest debug logging
+        private static int chestDebugCounter = 0;
 
         private void TryFindAndCreateBeacon(string objName, Vector3 playerPos)
         {
             try
             {
                 var obj = GameObject.Find(objName);
-                if (obj == null || !obj.activeInHierarchy) return;
 
-                int id = obj.GetInstanceID();
-                if (!activeBeacons.ContainsKey(id))
+                // Debug logging for chest specifically (every 100 scans)
+                if (objName.ToLower().Contains("chest"))
                 {
-                    float distance = Vector3.Distance(playerPos, obj.transform.position);
-                    if (distance <= detectionRadius)
+                    chestDebugCounter++;
+                    if (chestDebugCounter % 100 == 1)
                     {
-                        string type = IdentifyType(objName.ToLower());
-                        if (type != "unknown")
-                        {
-                            CreateBeacon(obj, type, id);
-                            Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon: {objName} -> {type} at dist {distance:F0}");
-                        }
+                        Plugin.Log.LogInfo($"[DirectionalAudio] DEBUG: Searching for '{objName}' - Found: {(obj != null ? "YES" : "NO")}");
                     }
                 }
 
-                // NUEVO: Escanear hermanos para encontrar duplicados con el mismo nombre base
+                if (obj == null) return;
+                if (!obj.activeInHierarchy) return;
+
+                int id = obj.GetInstanceID();
+
+                // Skip if already have beacon
+                if (activeBeacons.ContainsKey(id)) return;
+
+                // Skip if already interacted
+                if (interactedObjects.Contains(id)) return;
+
+                float distance = Vector3.Distance(playerPos, obj.transform.position);
+                if (distance <= detectionRadius)
+                {
+                    string type = IdentifyType(objName.ToLower());
+                    if (type != "unknown")
+                    {
+                        CreateBeacon(obj, type, id);
+                        Plugin.Log.LogInfo($"[DirectionalAudio] PROACTIVE found: {objName} -> {type} at dist {distance:F0}");
+                    }
+                }
+
+                // Escanear hermanos para encontrar duplicados
                 ScanSiblingsForDuplicates(obj, playerPos);
             }
             catch { }
@@ -658,11 +679,103 @@ namespace MegabonkAccess.Components
 
                 // Búsqueda específica de todos los Pickups activos en la escena
                 ScanAllPickups(playerPos);
+
+                // Escanear contenedores conocidos de interactables
+                ScanInteractableContainers(playerPos);
             }
             catch (Exception e)
             {
                 Plugin.Log.LogDebug($"[DirectionalAudio] ScanForInteractables error: {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// Escanea contenedores conocidos donde se encuentran los interactables.
+        /// Esto permite encontrar TODOS los objetos, no solo el primero.
+        /// </summary>
+        private void ScanInteractableContainers(Vector3 playerPos)
+        {
+            // Nombres comunes de contenedores donde Unity/el juego coloca objetos
+            string[] containerNames = {
+                "Interactables", "Objects", "Props", "World", "Level",
+                "Environment", "Spawned", "Generated", "Map", "Gameplay",
+                "Decorations", "Breakables", "Destructibles"
+            };
+
+            foreach (var containerName in containerNames)
+            {
+                try
+                {
+                    var container = GameObject.Find(containerName);
+                    if (container != null)
+                    {
+                        ScanContainerForInteractables(container.transform, playerPos, 0, 3);
+                    }
+                }
+                catch { }
+            }
+
+            // También escanear desde el padre del jugador (si está en la escena)
+            if (playerTransform != null && playerTransform.parent != null)
+            {
+                // Subir hasta la raíz de la escena y escanear
+                Transform sceneRoot = playerTransform.parent;
+                while (sceneRoot.parent != null)
+                {
+                    sceneRoot = sceneRoot.parent;
+                }
+                ScanContainerForInteractables(sceneRoot, playerPos, 0, 4);
+            }
+        }
+
+        /// <summary>
+        /// Escanea un contenedor recursivamente buscando interactables.
+        /// </summary>
+        private void ScanContainerForInteractables(Transform container, Vector3 playerPos, int depth, int maxDepth)
+        {
+            if (container == null || depth > maxDepth) return;
+
+            try
+            {
+                int childCount = container.childCount;
+                for (int i = 0; i < childCount; i++)
+                {
+                    try
+                    {
+                        var child = container.GetChild(i);
+                        if (child == null || !child.gameObject.activeInHierarchy) continue;
+
+                        var childObj = child.gameObject;
+                        int id = childObj.GetInstanceID();
+
+                        // Skip si ya tenemos beacon o fue interactuado
+                        if (activeBeacons.ContainsKey(id) || interactedObjects.Contains(id)) continue;
+
+                        // Verificar distancia
+                        float distance = Vector3.Distance(playerPos, childObj.transform.position);
+                        if (distance > detectionRadius) continue;
+
+                        // Verificar si tiene BaseInteractable
+                        var interactable = childObj.GetComponent<BaseInteractable>();
+                        if (interactable != null)
+                        {
+                            string type = IdentifyTypeFromInteractable(interactable, childObj.name.ToLower());
+                            if (type != "unknown")
+                            {
+                                CreateBeacon(childObj, type, id);
+                            }
+                        }
+
+                        // Recursión para hijos
+                        if (child.childCount > 0)
+                        {
+                            ScanContainerForInteractables(child, playerPos, depth + 1, maxDepth);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
         }
 
         private void ScanAllPickups(Vector3 playerPos)
@@ -1084,69 +1197,67 @@ namespace MegabonkAccess.Components
 
         private bool IsMenuOpen()
         {
-            // OPTIMIZED: Only use fast checks, no GameObject.Find() spam
-
-            // 1. TimeScale check - very fast, catches pause menu
+            // 1. TimeScale check - catches pause menu
             if (Time.timeScale < 0.1f)
             {
                 return true;
             }
 
-            // 2. Chest animation check - instant flag check
-            if (ChestAnimationTracker.IsChestAnimationPlaying)
+            // 2. Pause menu check - look for common pause menu objects
+            try
+            {
+                string[] pauseMenuNames = { "PauseMenu", "PausePanel", "Pause", "PauseScreen", "PauseCanvas", "B_Resume", "ResumeButton" };
+                foreach (var menuName in pauseMenuNames)
+                {
+                    var menu = GameObject.Find(menuName);
+                    if (menu != null && menu.activeInHierarchy)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Chest window open check (entire duration, not just animation)
+            if (ChestAnimationTracker.IsChestWindowOpen || ChestAnimationTracker.IsChestAnimationPlaying)
             {
                 return true;
             }
 
-            // 3. MenuStateTracker - our own flag, instant check
+            // 3. MenuStateTracker - checks for upgrade buttons, chest windows, etc.
             if (MenuStateTracker.IsAnyMenuOpen)
             {
                 return true;
             }
 
-            // 3. EventSystem check - fast, catches any focused UI
+            // 4. DeathCamera check - cached reference
             try
             {
-                var eventSystem = UnityEngine.EventSystems.EventSystem.current;
-                if (eventSystem != null && eventSystem.currentSelectedGameObject != null)
-                {
-                    // Any UI element selected = menu is open
-                    return true;
-                }
-            }
-            catch { }
-
-            // 4. Camera.main check - Unity caches this, fairly fast
-            try
-            {
-                var mainCam = Camera.main;
-                if (mainCam == null)
-                {
-                    return true; // No camera = probably in transition/menu
-                }
-                // Check if it's the death camera
-                if (mainCam.gameObject.name.Contains("Death"))
-                {
-                    return true;
-                }
-            }
-            catch { }
-
-            // 5. DeathCamera check - cached reference, searched periodically
-            try
-            {
-                // Search for DeathCamera periodically (every 0.5s)
                 if (Time.time >= nextDeathCameraSearchTime)
                 {
                     cachedDeathCamera = GameObject.Find("DeathCamera");
                     nextDeathCameraSearchTime = Time.time + 0.5f;
                 }
 
-                // Check if cached DeathCamera is active and enabled
                 if (cachedDeathCamera != null && cachedDeathCamera.activeInHierarchy)
                 {
                     var camComponent = cachedDeathCamera.GetComponent<Camera>();
                     if (camComponent != null && camComponent.enabled)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            // 5. Death screen detection - check for death-related buttons
+            try
+            {
+                string[] deathButtonNames = { "B_Continue", "ContinueButton", "RestartButton", "StatsButton" };
+                foreach (var btnName in deathButtonNames)
+                {
+                    var btn = GameObject.Find(btnName);
+                    if (btn != null && btn.activeInHierarchy)
                     {
                         return true;
                     }
@@ -1401,6 +1512,7 @@ namespace MegabonkAccess.Components
         /// <summary>
         /// Registra un interactuable descubierto (llamado desde BaseInteractablePatch)
         /// Solo registra si NO existe ya un beacon (evita crear después de interacción)
+        /// También escanea hermanos para encontrar objetos similares cercanos.
         /// </summary>
         public void RegisterDiscoveredInteractable(BaseInteractable interactable)
         {
@@ -1421,20 +1533,26 @@ namespace MegabonkAccess.Components
                 if (obj == null) return;
 
                 int id = obj.GetInstanceID();
-
-                // Si ya existe un beacon O si ya fue interactuado, no registrar
-                if (activeBeacons.ContainsKey(id) || interactedObjects.Contains(id)) return;
-
                 Vector3 playerPos = playerTransform.position;
-                float distance = Vector3.Distance(playerPos, obj.transform.position);
-                if (distance > detectionRadius) return;
 
-                string type = IdentifyTypeFromInteractable(interactable, obj.name.ToLower());
-                if (type != "unknown")
+                // Registrar este objeto si no existe beacon ni fue interactuado
+                if (!activeBeacons.ContainsKey(id) && !interactedObjects.Contains(id))
                 {
-                    CreateBeacon(obj, type, id);
-                    Plugin.Log.LogInfo($"[DirectionalAudio] Registered via hover: {type} at {obj.transform.position}");
+                    float distance = Vector3.Distance(playerPos, obj.transform.position);
+                    if (distance <= detectionRadius)
+                    {
+                        string type = IdentifyTypeFromInteractable(interactable, obj.name.ToLower());
+                        if (type != "unknown")
+                        {
+                            CreateBeacon(obj, type, id);
+                            Plugin.Log.LogInfo($"[DirectionalAudio] Registered via hover: {type} at {obj.transform.position}");
+                        }
+                    }
                 }
+
+                // IMPORTANTE: Escanear hermanos para encontrar objetos similares
+                // Esto permite descubrir todos los pots/chests cuando el jugador encuentra uno
+                ScanSiblingsForDuplicates(obj, playerPos);
             }
             catch (Exception e)
             {

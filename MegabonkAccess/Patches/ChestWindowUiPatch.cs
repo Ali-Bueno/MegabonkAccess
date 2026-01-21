@@ -8,11 +8,13 @@ using TMPro;
 namespace MegabonkAccess
 {
     /// <summary>
-    /// Tracks chest opening animation state for DirectionalAudioManager.
+    /// Tracks chest window state for DirectionalAudioManager.
+    /// Beacons should be paused while chest window is open.
     /// </summary>
     public static class ChestAnimationTracker
     {
         public static bool IsChestAnimationPlaying { get; set; } = false;
+        public static bool IsChestWindowOpen { get; set; } = false;
     }
 
     /// <summary>
@@ -25,7 +27,23 @@ namespace MegabonkAccess
         public static void Postfix()
         {
             ChestAnimationTracker.IsChestAnimationPlaying = true;
-            Plugin.Log.LogInfo("[ChestWindowUi] Chest window opened - animation started");
+            ChestAnimationTracker.IsChestWindowOpen = true;
+            Plugin.Log.LogInfo("[ChestWindowUi] Chest window opened");
+        }
+    }
+
+    /// <summary>
+    /// Patch for ChestWindowUi.OnClose to detect when chest window closes.
+    /// </summary>
+    [HarmonyPatch(typeof(ChestWindowUi), "OnClose")]
+    public static class ChestWindowUi_OnClose_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            ChestAnimationTracker.IsChestAnimationPlaying = false;
+            ChestAnimationTracker.IsChestWindowOpen = false;
+            Plugin.Log.LogInfo("[ChestWindowUi] Chest window closed");
         }
     }
 
