@@ -1,340 +1,170 @@
-Perfecto. Aquí tienes un \*\*README.md con un enfoque más técnico\*\*, conciso pero lo bastante preciso para que \*\*Gemini o Claude entiendan bien el contexto, la estructura del proyecto y las decisiones técnicas\*\*.
+# Megabonk Accessibility Project (Technical Overview)
 
+## Project Goal
 
+This project aims to **add full accessibility support to the Unity game *Megabonk*** using **BepInEx IL2CPP** modding.
 
-Puedes copiarlo y pegarlo tal cual 👇
+The main objective is to make the game **fully playable by blind and visually impaired players**, using:
+- Audio feedback
+- Text-to-speech (TTS) via Tolk
+- Directional 3D audio beacons for navigation
 
-
-
----
-
-
-
-```md
-
-\# Megabonk Accessibility Project (Technical Overview)
-
-
-
-\## Project Goal
-
-This project aims to \*\*add full accessibility support to the Unity game \*Megabonk\*\*\* by working directly with its \*\*decompiled source code\*\*.
-
-
-
-The main objective is to make the game \*\*fully playable by blind and visually impaired players\*\*, using:
-
-\- Audio feedback
-
-\- Text-to-speech (TTS)
-
-\- Directional and contextual sound cues
-
-
-
-Accessibility is implemented as an \*\*additional layer\*\*, without altering the core gameplay design.
-
-
+Accessibility is implemented as an **additional layer**, without altering the core gameplay design.
 
 ---
 
+## Project Structure
 
+### Mod Code
+- `MegabonkAccess/` - Main BepInEx plugin
+  - `Plugin.cs` - Entry point
+  - `TolkUtil.cs` - Screen reader wrapper
+  - `Patches/` - Harmony patches for game hooks
+  - `Components/` - Custom Unity components (DirectionalAudioManager)
 
-\## Project Structure
+### References
+- `/references/` - Game assemblies and dependencies
+- `TolkDotNet.dll` + `Tolk.dll` - Screen reader support (NVDA, JAWS, SAPI)
 
-
-
-\### Source Code
-
-\- The decompiled game code is located in:
-
-```
-
-
-
-/megabonk code/
-
-
-
-```
-
-
-
-This folder contains all reconstructed C# scripts from the original Unity build, including:
-
-\- Menu logic
-
-\- UI controllers
-
-\- Gameplay systems
-
-\- Input handling
-
-
-
-\### References
-
-\- All required external assemblies and dependencies are located in:
-
-```
-
-
-
-/references/
-
-
-
-```
-
-
-
-This folder includes Unity assemblies and any third-party libraries needed to compile or analyze the project.
-
-
-
-\### Text-to-Speech
-
-\- The project uses \*\*Tolk\*\* for screen reader support.
-
-\- Tolk is accessed through the .NET wrapper:
-
-```
-
-
-
-TolkDotNet.dll
-
-
-
-```
-
-
-
-This allows communication with installed screen readers (NVDA, JAWS, SAPI, etc.) without hard dependencies on a specific TTS engine.
-
-
+### Game Location
+- `D:\games\steam\steamapps\common\Megabonk\`
+- BepInEx log: `BepInEx\LogOutput.log`
 
 ---
-
-
-
-
-
-
-
-
-
-
 
 ## Development Phases
 
-
-
-
-
-
-
-### Phase 1 – Menu Accessibility (In Progress)
-
-
-
-
-
-
-
-**Priority:** High
-
-
-
-
-
-
-
-#### Objectives & Status
-
-
-
-- [x] **Project Setup**: BepInEx + Tolk (Screen Reader) integration.
-
-
-
-- [x] **Main Menu**: Fully announced (Title, "Accessibility Loaded").
-
-
-
-- [x] **Button Navigation**: Reads button text (Play, Settings, etc.).
-
-
-
-- [x] **Settings Menu - Value Changes**: Reads new values when changing options (Left/Right arrows) using diffing logic.
-
-
-
-- [ ] **Settings Menu - State Reading**: Announcing current value when simply focusing the option (Up/Down) is currently **pending/problematic** due to IL2CPP structure.
-
-
-
-- [x] Character selection (uses component search due to IL2CPP field obfuscation)
-
-
-
-- [x] Level-up item selection (UpgradeButton) - reads item name, description, rarity
-
-
-
-- [ ] Meta-progression / upgrades
-
-
-
-- [ ] Pause menu
-
-
-
-
-
-
-
-#### Target Systems
-
-
-
-- Main menu
-
-
-
-- Character selection
-
-
-
-- Meta-progression / upgrades
-
-
-
-- Pause menu
-
-
-
-- Settings menu
-
-
-
-
-
-
+### Phase 1 - Menu Accessibility (Complete)
+
+**Status:** Functional
+
+#### Completed
+- [x] **Project Setup**: BepInEx IL2CPP + Tolk integration
+- [x] **Main Menu**: Title and navigation announced
+- [x] **Button Navigation**: Reads button text (Play, Settings, etc.)
+- [x] **Settings Menu**: Reads new values when changing options
+- [x] **Character selection**: Reads character name, description, weapon, passive abilities
+- [x] **Level-up item selection**: (UpgradeButton) reads item name, description, rarity
+- [x] **Chest menu**: (ChestWindowUi) announces chest contents when opened
+- [x] **Shrine encounters**: (EncounterButton) reads options and rarities
+- [x] **Interactables**: (BaseInteractable) announces interaction text on hover
+
+#### Pending
+- [ ] **Settings Menu - State Reading**: Current value on focus (IL2CPP issues)
+- [ ] **Meta-progression / upgrades**: Not implemented
+- [ ] **Pause menu accessibility**: Basic detection works
 
 ---
 
+### Phase 2 - Gameplay Accessibility (In Progress)
 
+#### Directional Audio Beacons
 
+**Status:** Partially working with known bugs
 
+##### Implemented Features
+- 3D spatialized audio beacons for interactables
+- Different sounds/pitches per object type (chest, shrine, portal, urn, etc.)
+- Detection radius: 120 units
+- Scene change cleanup
+- 4-second delay after scene load (skip intro cinematic)
+- Beacons removed after interaction (BaseInteractable.Interact patch)
 
+##### Menu Detection (sounds pause during menus)
+Working detection methods:
+- `Time.timeScale < 0.1f` - Pause menu
+- `MenuStateTracker.IsAnyMenuOpen` - Upgrade/chest menus via button detection
+- `DeathCamera` active and enabled - Death sequence
+- `EventSystem.currentSelectedGameObject` - UI focus detection
+- Death buttons: "ContinueButton", "RestartButton", "StatsButton", etc.
 
-
-### Phase 2 – Gameplay Accessibility
-
-
-
-
-
-
-
-
-
-
-
-\*\*Priority:\*\* After menu completion
-
-
-
-\#### Design Constraints
-
-\- No visual dependency
-
-\- No precision platforming
-
-\- Preserve original gameplay flow and difficulty
-
-
-
-\#### Planned Systems
-
-\- Directional audio cues for:
-
-\- Enemies (distance + direction)
-
-\- Bosses / elite enemies
-
-\- Important pickups and events
-
-\- Optional \*\*directional assistance system\*\*:
-
-\- Audio-based guidance toward safer areas
-
-\- Alerts when the player is surrounded
-
-\- Fully configurable verbosity and intensity
-
-
+##### Known Bugs (TODO)
+1. **Multiple objects with same name**: `GameObject.Find()` only returns first match. Objects like multiple pots only get beacons after hover detection, not proactive scan.
+2. **Chest opening animation**: Beacons still play during chest open animation
+3. **Some interactables don't remove beacons**: Boss summoner and others persist after use
+4. **Object naming inconsistencies**: Game uses both "ShrineCursed" and "CursedShrine" patterns
 
 ---
 
+## IL2CPP Limitations & Workarounds
 
+### Methods that DON'T work in IL2CPP:
+- `FindObjectsOfType<T>()` - "Method not found"
+- `Scene.GetRootGameObjects()` - "Method not found"
+- `OnEnable()` / `OnDisable()` patches - Not exposed
+- Generic method patches in some cases
 
-\## Technical Approach
+### Workarounds used:
+- `GameObject.Find(name)` for specific object names
+- Component search via `GetComponent<T>()` on known objects
+- Name-based pattern matching with Clone variants
+- `ClassInjector.RegisterTypeInIl2Cpp<T>()` for custom MonoBehaviours
 
-
-
-\- Unity-based architecture
-
-\- Direct modification of decompiled C# code
-
-\- Accessibility systems implemented as \*\*modular, reusable components\*\*
-
-\- \*\*Modular Menu Patching:\*\* Separate patch logic for distinctly different menus (Main Menu, Character Selection, Settings) to prevent logic conflicts and audio interruptions.
-
-\- Minimal coupling with gameplay logic
-
-\- Preference for event-driven hooks over polling
-
-\- Audio spatialization compatible with HRTF setups where possible
-
-
-
----
-
-
-
-\## Accessibility Philosophy
-
-
-
-Accessibility is treated as a \*\*first-class system\*\*, not as optional helpers.
-
-
-
-A blind player should be able to:
-
-\- Navigate all menus independently
-
-\- Understand game state through sound and speech
-
-\- Make informed strategic decisions without visual feedback
-
-
+### Object Naming Patterns
+Unity clone naming conventions to search:
+- `ObjectName`
+- `ObjectName(Clone)`
+- `ObjectName (Clone)`
+- `ObjectName(Clone) (1)`, `(2)`, etc.
 
 ---
 
+## Key Technical Findings
 
+### Menu State Detection
+Objects that ALWAYS exist (can't use for detection):
+- `DeathScreen` - Always active, just hidden
+- `DeathCamera` component - Always enabled
 
-\## Notes
+Objects/states that work for detection:
+- `DeathCamera` as `Camera.main` - Only during death
+- Death buttons appearing (ContinueButton, etc.)
+- `Time.timeScale` changes
+- `EventSystem.currentSelectedGameObject` focus
 
-This project is exploratory and iterative.
-
-Code clarity and modularity are prioritized to allow future expansion and maintenance.
-
+### Interactable Object Names (from logs)
+```
+CursedShrine(Clone)
+PotSmall(Clone)
+PotSmallSilver(Clone)
+Portal
 ```
 
+### Audio Clips Available (from AudioManager children)
+- Gold sound
+- Silver sound
+- Bullseye sound
+- XP sound
+- Dungeon door (removed - confusing at start)
 
+---
 
+## File Reference
 
+### Patches
+- `BaseInteractablePatch.cs` - Hover announcements + beacon registration + interaction removal
+- `UpgradeButtonPatch.cs` - Level-up menu + MenuStateTracker
+- `ChestWindowUiPatch.cs` - Chest contents announcement
+- `EncounterButtonPatch.cs` - Shrine options
 
+### Components
+- `DirectionalAudioManager.cs` - 3D audio beacon system
+
+---
+
+## Build & Deploy
+
+```bash
+cd MegabonkAccess
+dotnet build --configuration Release
+```
+
+Auto-copies to: `D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\`
+
+---
+
+## Notes
+
+- This is an IL2CPP game (Unity 2023.2.22f1)
+- Screen reader support requires Tolk.dll in game root folder
+- Test with BepInEx console or LogOutput.log for debugging

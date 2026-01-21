@@ -8,6 +8,80 @@ using TMPro;
 namespace MegabonkAccess
 {
     /// <summary>
+    /// Static class to track menu states for DirectionalAudioManager.
+    /// Uses active object detection instead of timeouts.
+    /// </summary>
+    public static class MenuStateTracker
+    {
+        public static bool IsAnyMenuOpen
+        {
+            get
+            {
+                try
+                {
+                    // Check if any UpgradeButton is active (level-up menu)
+                    var upgradeButton = GameObject.Find("UpgradeButton");
+                    if (upgradeButton != null && upgradeButton.activeInHierarchy)
+                    {
+                        // Verify it has active parent (the menu panel)
+                        var parent = upgradeButton.transform.parent;
+                        if (parent != null && parent.gameObject.activeInHierarchy)
+                        {
+                            return true;
+                        }
+                    }
+
+                    // Check for upgrade buttons with numbers (UpgradeButton (1), etc.)
+                    for (int i = 0; i < 5; i++)
+                    {
+                        string name = i == 0 ? "UpgradeButton" : $"UpgradeButton ({i})";
+                        var btn = GameObject.Find(name);
+                        if (btn != null && btn.activeInHierarchy)
+                        {
+                            return true;
+                        }
+                    }
+
+                    // Check for ChestWindowUi and variations
+                    string[] chestWindowNames = {
+                        "ChestWindowUi", "ChestWindowUi(Clone)", "ChestWindow", "ChestWindow(Clone)",
+                        "ItemWindow", "ItemWindowUi", "ItemWindow(Clone)",
+                        "RewardWindow", "RewardPanel", "LootWindow", "LootPanel",
+                        "PickupWindow", "ItemPickup", "ChestReward", "ChestItem"
+                    };
+
+                    foreach (var windowName in chestWindowNames)
+                    {
+                        var window = GameObject.Find(windowName);
+                        if (window != null && window.activeInHierarchy)
+                        {
+                            return true;
+                        }
+                    }
+
+                    // Check for common item/reward buttons that indicate a menu is open
+                    string[] buttonNames = {
+                        "TakeButton", "LeaveButton", "DiscardButton", "BanishButton",
+                        "AcceptButton", "DeclineButton", "PickupButton"
+                    };
+
+                    foreach (var buttonName in buttonNames)
+                    {
+                        var btn = GameObject.Find(buttonName);
+                        if (btn != null && btn.activeInHierarchy)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Dedicated patch for UpgradeButton accessibility during level-up.
     /// Hooks StartHover which is called when navigating between upgrade options.
     /// </summary>

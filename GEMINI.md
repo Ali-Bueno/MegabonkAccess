@@ -174,19 +174,31 @@ This allows communication with installed screen readers (NVDA, JAWS, SAPI, etc.)
 
 
 
-- [x] Character selection (uses component search due to IL2CPP field obfuscation)
+- [x] **Character selection**: Uses component search due to IL2CPP field obfuscation. Reads character name, description, weapon, and passive abilities.
 
 
 
-- [x] Level-up item selection (UpgradeButton) - reads item name, description, rarity
+- [x] **Level-up item selection**: (UpgradeButton) - reads item name, description, rarity.
 
 
 
-- [ ] Meta-progression / upgrades
+- [x] **Chest menu**: (ChestWindowUi) - announces chest contents including item name, description, and rarity when opened.
 
 
 
-- [ ] Pause menu
+- [x] **Shrine encounters**: (EncounterButton) - reads shrine option descriptions and rarities when navigating options.
+
+
+
+- [x] **Interactables**: (BaseInteractable) - announces interaction text when hovering over shrines, chests, NPCs, and other interactables.
+
+
+
+- [ ] **Meta-progression / upgrades**: Pending implementation.
+
+
+
+- [ ] **Pause menu**: Pending implementation.
 
 
 
