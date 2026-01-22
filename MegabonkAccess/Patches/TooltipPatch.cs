@@ -18,12 +18,6 @@ namespace MegabonkAccess
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // Skip if a specialized patch recently spoke
-            if (TolkUtil.ShouldSkipGenericPatch())
-            {
-                return;
-            }
-
             try
             {
                 // Clean the text

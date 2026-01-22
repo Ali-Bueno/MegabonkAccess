@@ -43,9 +43,11 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - [x] **Main Menu**: Title and navigation announced
 - [x] **Button Navigation**: Reads button text (Play, Settings, etc.)
 - [x] **Settings Menu**: Reads new values when changing options
-- [x] **Character selection**: Reads character name, description, weapon, passive (with delayed speech)
-- [x] **Shop menu**: Reads item info via ShopFooter.Set patch (with delayed speech)
-- [x] **Unlocks menu**: Reads unlock info via UnlocksFooter.OnUnlockSelected patch (with delayed speech)
+- [x] **Character selection**: Reads character name, description, weapon, passive (Transform-based search)
+- [x] **Shop menu**: Reads item info via ShopFooter.Set patch (Transform-based search)
+- [x] **Unlocks menu**: Reads unlock info via UnlocksFooter.OnUnlockSelected patch (Transform-based search)
+- [x] **Locked item handling**: Detects locked items via reqContainer, announces "Bloqueado" + requirements
+- [x] **Unlocked item handling**: Reads texts outside requirement containers, filters progress texts
 - [x] **Level-up item selection**: (UpgradeButton) reads item name, description, rarity
 - [x] **Chest menu**: (ChestWindowUi) announces chest contents when opened
 - [x] **Shrine encounters**: (EncounterButton) reads options and rarities
@@ -96,6 +98,8 @@ Detection methods in `IsMenuOpen()`:
 4. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch, not just animation
 5. **Beacons during pause menu**: Added specific pause menu object detection
 6. **Beacons during death**: Restored `DeathCamera` check + death button detection
+7. **Items reading requirements from other items**: Rewrote menu patches to use Transform-based search. For unlocked items, uses `GetTextsOutsideRequirements()` to skip texts inside requirement containers.
+8. **IL2CPP trampoline errors**: Direct property access on patched instances caused crashes. Fixed by using `__instance.transform` and recursive `FindChildByName()` search.
 
 ---
 
@@ -136,6 +140,46 @@ if (TolkUtil.ShouldSkipGenericPatch()) return;
 - Name-based pattern matching with Clone variants
 - `ClassInjector.RegisterTypeInIl2Cpp<T>()` for custom MonoBehaviours
 - String type name comparison instead of `is` operator
+- Transform-based recursive search instead of direct property access (avoids IL2CPP trampoline errors)
+
+### Transform-Based UI Reading Pattern
+Direct property access like `__instance.t_name` causes IL2CPP trampoline errors. Use this pattern instead:
+```csharp
+// Instead of: string name = __instance.t_name.text;
+// Use:
+Transform root = __instance.transform;
+string name = FindTextByObjectName(root, "t_name");
+
+private static string FindTextByObjectName(Transform root, string objectName)
+{
+    var obj = FindChildByName(root, objectName);
+    if (obj == null) return "";
+    var tmp = obj.GetComponent<TextMeshProUGUI>();
+    if (tmp == null) return "";
+    return SanitizeText(tmp.text);
+}
+```
+
+### Excluding Requirement Texts Pattern
+To read item info without mixing in requirements from other items:
+```csharp
+private static void CollectTextsOutsideRequirements(Transform parent, List<string> list, bool insideReq)
+{
+    string objName = parent.name.ToLower();
+    bool isReqContainer = objName.Contains("requirement") || objName.Contains("reqcontainer") ||
+                          objName.Contains("reqprefab") || objName.StartsWith("req");
+    if (isReqContainer) insideReq = true;
+
+    if (!insideReq)
+    {
+        var tmp = parent.GetComponent<TextMeshProUGUI>();
+        if (tmp != null) list.Add(SanitizeText(tmp.text));
+    }
+
+    for (int i = 0; i < parent.childCount; i++)
+        CollectTextsOutsideRequirements(parent.GetChild(i), list, insideReq);
+}
+```
 
 ### Object Naming Patterns
 Unity clone naming conventions to search:
@@ -166,9 +210,25 @@ Objects found proactively by `ScanRootObjectsByName()`:
 - Microwave, Boombox (music)
 
 ### Garbage Text in Game
-The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Use `RemoveGarbageText()` regex to clean:
+The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Use `HasGarbagePattern()` regex to detect:
 ```csharp
-Regex.Replace(text, @"\s+[fsde]+(\s+[fsde]+)+\s*$", "", RegexOptions.IgnoreCase);
+if (Regex.IsMatch(text, @"([sd]{2,}\s*){3,}", RegexOptions.IgnoreCase)) return true;
+if (Regex.IsMatch(text, @"([a-z]{1,2}\s+){5,}", RegexOptions.IgnoreCase)) return true;
+if (Regex.IsMatch(text, @"[fsde]{3,}", RegexOptions.IgnoreCase)) return true;
+```
+
+### Progress Text Filtering
+The game shows progress like "100 / 10 000" or pure numbers like "5,000". Filter with:
+```csharp
+private static bool IsProgressText(string text)
+{
+    if (string.IsNullOrEmpty(text)) return false;
+    // Progress: number / number (e.g., "100 / 10 000", "363 / 1.000")
+    if (Regex.IsMatch(text, @"^\s*[\d.,\s]+\s*/\s*[\d.,\s]+\s*$")) return true;
+    // Pure numbers: "5,000", "10.000", "100"
+    if (Regex.IsMatch(text, @"^\s*[\d.,\s]+\s*$")) return true;
+    return false;
+}
 ```
 
 ---

@@ -26,58 +26,65 @@ namespace MegabonkAccess
         {
             if (__instance == null) return;
 
-            // Store reference for delayed reading
-            var instanceRef = __instance;
-
-            // Schedule the reading after a short delay to allow UI to update
-            TolkUtil.ScheduleDelayedAction(() => ReadCharacterInfo(instanceRef));
-        }
-
-        private static void ReadCharacterInfo(CharacterInfoUI instance)
-        {
-            if (instance == null) return;
-
             try
             {
-                // Find all TextMeshProUGUI components in children
-                var allTexts = GetAllTextComponents(instance.transform);
+                Transform root = __instance.transform;
 
-                if (allTexts.Count == 0)
-                {
-                    return;
-                }
+                // Check if character is locked by looking for active requirements
+                bool isLocked = IsCharacterLocked(root);
 
                 StringBuilder sb = new StringBuilder();
 
-                foreach (var tmp in allTexts)
+                if (isLocked)
                 {
-                    if (tmp == null) continue;
+                    // Character is locked - read name and requirements only
+                    string charName = FindTextByObjectName(root, "t_name");
+                    if (!string.IsNullOrEmpty(charName))
+                    {
+                        sb.Append(charName).Append(". ");
+                    }
 
-                    string text = SanitizeText(tmp.text);
-                    if (string.IsNullOrEmpty(text)) continue;
+                    sb.Append("Bloqueado. ");
 
-                    // Skip if it's a known button/label
-                    if (SkipTexts.Contains(text)) continue;
+                    // Get requirements
+                    string requirements = GetRequirementsText(root);
+                    if (!string.IsNullOrEmpty(requirements))
+                    {
+                        sb.Append("Para desbloquear: ").Append(requirements);
+                    }
+                }
+                else
+                {
+                    // Character is unlocked - read all relevant info
+                    var allTexts = GetAllTextComponents(root);
 
-                    // Skip very short texts (likely labels)
-                    if (text.Length < 4) continue;
+                    foreach (var tmp in allTexts)
+                    {
+                        if (tmp == null) continue;
 
-                    // Skip texts that are mostly numbers or progress
-                    if (IsProgressOrNumber(text)) continue;
+                        string text = SanitizeText(tmp.text);
+                        if (string.IsNullOrEmpty(text)) continue;
 
-                    // Skip texts with garbage patterns like "sds sdd"
-                    if (HasGarbagePattern(text)) continue;
+                        // Skip if it's a known button/label
+                        if (SkipTexts.Contains(text)) continue;
 
-                    // Skip if it looks like a challenge description
-                    if (IsLikelyChallengeText(text)) continue;
+                        // Skip very short texts (likely labels)
+                        if (text.Length < 4) continue;
 
-                    sb.Append(text).Append(". ");
+                        // Skip texts that are mostly numbers or progress
+                        if (IsProgressOrNumber(text)) continue;
+
+                        // Skip texts with garbage patterns
+                        if (HasGarbagePattern(text)) continue;
+
+                        sb.Append(text).Append(". ");
+                    }
                 }
 
-                string result = sb.ToString();
+                string result = sb.ToString().Trim();
 
-                // Allow re-reading after 0.3s
-                float currentTime = UnityEngine.Time.unscaledTime;
+                // Prevent duplicate announcements
+                float currentTime = Time.unscaledTime;
                 bool isDifferent = result != lastAnnouncement;
                 bool enoughTimePassed = (currentTime - lastAnnouncementTime) > 0.3f;
 
@@ -95,6 +102,146 @@ namespace MegabonkAccess
             }
         }
 
+        private static bool IsCharacterLocked(Transform root)
+        {
+            // Look for reqContainer or requirements that are active
+            var reqContainer = FindChildByName(root, "reqContainer");
+            if (reqContainer != null && reqContainer.gameObject.activeInHierarchy)
+            {
+                // Check if there are active requirement prefabs inside
+                for (int i = 0; i < reqContainer.childCount; i++)
+                {
+                    var child = reqContainer.GetChild(i);
+                    if (child != null && child.gameObject.activeInHierarchy)
+                    {
+                        // Found an active requirement
+                        return true;
+                    }
+                }
+            }
+
+            // Also check for any object with "Requirement" in name that's active
+            return HasActiveRequirements(root);
+        }
+
+        private static bool HasActiveRequirements(Transform parent)
+        {
+            if (parent == null) return false;
+
+            string name = parent.name.ToLower();
+            if ((name.Contains("requirement") || name.Contains("reqcontainer")) && parent.gameObject.activeInHierarchy)
+            {
+                // Check if it has active children
+                for (int i = 0; i < parent.childCount; i++)
+                {
+                    var child = parent.GetChild(i);
+                    if (child != null && child.gameObject.activeInHierarchy)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Recursively check children
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                if (HasActiveRequirements(parent.GetChild(i)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string GetRequirementsText(Transform root)
+        {
+            StringBuilder sb = new StringBuilder();
+            CollectRequirementsText(root, sb);
+            return sb.ToString();
+        }
+
+        private static void CollectRequirementsText(Transform parent, StringBuilder sb)
+        {
+            if (parent == null) return;
+
+            string name = parent.name.ToLower();
+
+            // If this is a requirement prefab or container, get its text
+            bool isReqObject = (name.Contains("requirement") || name.Contains("reqprefab") ||
+                               (name.StartsWith("req") && parent.gameObject.activeInHierarchy));
+
+            if (isReqObject && parent.gameObject.activeInHierarchy)
+            {
+                // First try to find specific t_requirement text (the mission description)
+                string reqText = FindTextByObjectName(parent, "t_requirement");
+                if (!string.IsNullOrEmpty(reqText) && !HasGarbagePattern(reqText))
+                {
+                    if (sb.Length > 0) sb.Append(". ");
+                    sb.Append(reqText);
+
+                    // Also get progress text
+                    string progressText = FindTextByObjectName(parent, "t_progress");
+                    if (!string.IsNullOrEmpty(progressText) && !HasGarbagePattern(progressText))
+                    {
+                        sb.Append(" (").Append(progressText).Append(")");
+                    }
+                }
+                else
+                {
+                    // Fallback: get all texts from this requirement
+                    var texts = GetAllTextComponents(parent);
+                    foreach (var tmp in texts)
+                    {
+                        if (tmp == null) continue;
+                        string text = SanitizeText(tmp.text);
+                        if (string.IsNullOrEmpty(text) || text.Length < 3) continue;
+                        if (HasGarbagePattern(text)) continue;
+
+                        if (sb.Length > 0) sb.Append(". ");
+                        sb.Append(text);
+                    }
+                }
+                return; // Don't recurse into requirement prefabs
+            }
+
+            // Recurse into children
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                CollectRequirementsText(parent.GetChild(i), sb);
+            }
+        }
+
+        private static Transform FindChildByName(Transform parent, string name)
+        {
+            if (parent == null) return null;
+
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child != null && child.name.Equals(name, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return child;
+                }
+
+                var found = FindChildByName(child, name);
+                if (found != null) return found;
+            }
+
+            return null;
+        }
+
+        private static string FindTextByObjectName(Transform root, string objectName)
+        {
+            var obj = FindChildByName(root, objectName);
+            if (obj == null) return "";
+
+            var tmp = obj.GetComponent<TextMeshProUGUI>();
+            if (tmp == null) return "";
+
+            return SanitizeText(tmp.text);
+        }
+
         private static List<TextMeshProUGUI> GetAllTextComponents(Transform parent)
         {
             var list = new List<TextMeshProUGUI>();
@@ -105,7 +252,7 @@ namespace MegabonkAccess
         private static void GetTextComponentsRecursive(Transform parent, List<TextMeshProUGUI> list)
         {
             if (parent == null) return;
-            
+
             var comp = parent.GetComponent<TextMeshProUGUI>();
             if (comp != null) list.Add(comp);
 
@@ -118,42 +265,30 @@ namespace MegabonkAccess
 
         private static bool IsProgressOrNumber(string text)
         {
-            // Remove all non-digit characters except spaces and check if mostly numbers
             string cleaned = Regex.Replace(text, @"[^\d]", "");
             if (cleaned.Length == 0) return false;
-            
-            // If more than 50% of the text is digits, it's probably a number/progress
+
             float ratio = (float)cleaned.Length / text.Replace(" ", "").Length;
             if (ratio > 0.5f) return true;
-            
-            // Check for patterns like "10,000 / 10,000"
+
             if (Regex.IsMatch(text, @"\d+\s*/\s*\d+")) return true;
-            
+
             return false;
         }
 
         private static bool HasGarbagePattern(string text)
         {
-            // Detect garbage like "sds sdd sds dd sdsdsdsdsds"
+            if (string.IsNullOrEmpty(text)) return false;
             if (Regex.IsMatch(text, @"([sd]{2,}\s*){3,}", RegexOptions.IgnoreCase)) return true;
             if (Regex.IsMatch(text, @"([a-z]{1,2}\s+){5,}", RegexOptions.IgnoreCase)) return true;
-            return false;
-        }
-
-        private static bool IsLikelyChallengeText(string text)
-        {
-            string lower = text.ToLower();
-            if ((lower.Contains("kill") || lower.Contains("defeat") || lower.Contains("collect")) 
-                && HasGarbagePattern(text)) return true;
+            if (Regex.IsMatch(text, @"[fsde]{3,}", RegexOptions.IgnoreCase)) return true;
             return false;
         }
 
         private static string SanitizeText(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
-            // Remove rich text tags
             string result = Regex.Replace(text, "<.*?>", string.Empty);
-            // Remove newlines and excessive whitespace
             result = Regex.Replace(result, @"[\r\n]+", " ");
             result = Regex.Replace(result, @"\s+", " ");
             return result.Trim();
