@@ -100,6 +100,7 @@ Detection methods in `IsMenuOpen()`:
 6. **Beacons during death**: Restored `DeathCamera` check + death button detection
 7. **Items reading requirements from other items**: Rewrote menu patches to use Transform-based search. For unlocked items, uses `GetTextsOutsideRequirements()` to skip texts inside requirement containers.
 8. **IL2CPP trampoline errors**: Direct property access on patched instances caused crashes. Fixed by using `__instance.transform` and recursive `FindChildByName()` search.
+9. **Garbage text mixed with valid text**: Text like "Kill 1000 skeletons fsd fsdfesf efsdfes efs" was being fully discarded. Fixed with `RemoveGarbageFromText()` that strips only the garbage portion while preserving valid text.
 
 ---
 
@@ -210,11 +211,20 @@ Objects found proactively by `ScanRootObjectsByName()`:
 - Microwave, Boombox (music)
 
 ### Garbage Text in Game
-The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Use `HasGarbagePattern()` regex to detect:
+The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Two approaches:
+
+**Detection** - `HasGarbagePattern()` checks if entire text is garbage:
 ```csharp
-if (Regex.IsMatch(text, @"([sd]{2,}\s*){3,}", RegexOptions.IgnoreCase)) return true;
-if (Regex.IsMatch(text, @"([a-z]{1,2}\s+){5,}", RegexOptions.IgnoreCase)) return true;
-if (Regex.IsMatch(text, @"[fsde]{3,}", RegexOptions.IgnoreCase)) return true;
+if (Regex.IsMatch(text, @"^([sd]{2,}\s*){3,}$", RegexOptions.IgnoreCase)) return true;
+if (Regex.IsMatch(text, @"^([a-z]{1,2}\s+){5,}$", RegexOptions.IgnoreCase)) return true;
+```
+
+**Removal** - `RemoveGarbageFromText()` strips garbage from mixed text:
+```csharp
+// Removes 2+ consecutive words made only of f, s, d, e letters
+text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.IgnoreCase);
+// Example: "Kill 1000 skeletons fsd fsdfesf efsdfes efs. 100 / 10 000"
+//       -> "Kill 1000 skeletons. 100 / 10 000"
 ```
 
 ### Progress Text Filtering

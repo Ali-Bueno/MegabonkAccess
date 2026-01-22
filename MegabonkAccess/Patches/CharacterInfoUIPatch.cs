@@ -44,13 +44,13 @@ namespace MegabonkAccess
                         sb.Append(charName).Append(". ");
                     }
 
-                    sb.Append("Bloqueado. ");
+                    sb.Append("Locked. ");
 
                     // Get requirements
                     string requirements = GetRequirementsText(root);
                     if (!string.IsNullOrEmpty(requirements))
                     {
-                        sb.Append("Para desbloquear: ").Append(requirements);
+                        sb.Append("To unlock: ").Append(requirements);
                     }
                 }
                 else
@@ -281,7 +281,8 @@ namespace MegabonkAccess
             if (string.IsNullOrEmpty(text)) return false;
             if (Regex.IsMatch(text, @"([sd]{2,}\s*){3,}", RegexOptions.IgnoreCase)) return true;
             if (Regex.IsMatch(text, @"([a-z]{1,2}\s+){5,}", RegexOptions.IgnoreCase)) return true;
-            if (Regex.IsMatch(text, @"[fsde]{3,}", RegexOptions.IgnoreCase)) return true;
+            // Long sequences of fsde (6+) catches garbage but not words like "alrededor" (only 4)
+            if (Regex.IsMatch(text, @"[fsde]{6,}", RegexOptions.IgnoreCase)) return true;
             return false;
         }
 
@@ -291,6 +292,9 @@ namespace MegabonkAccess
             string result = Regex.Replace(text, "<.*?>", string.Empty);
             result = Regex.Replace(result, @"[\r\n]+", " ");
             result = Regex.Replace(result, @"\s+", " ");
+            // Remove garbage suffixes (6+ fsde characters at end)
+            result = Regex.Replace(result, @"\s*[fsde]{6,}\s*$", "", RegexOptions.IgnoreCase);
+            result = Regex.Replace(result, @"\s*[sd]{4,}\s*$", "", RegexOptions.IgnoreCase);
             return result.Trim();
         }
     }

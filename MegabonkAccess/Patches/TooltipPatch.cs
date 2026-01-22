@@ -16,12 +16,17 @@ namespace MegabonkAccess
         [HarmonyPostfix]
         public static void Postfix(string text)
         {
+            // Log ALL calls to Set, even empty ones
+            Plugin.Log.LogInfo($"TooltipNew.Set called with: '{text ?? "NULL"}'");
+
             if (string.IsNullOrEmpty(text)) return;
 
             try
             {
                 // Clean the text
                 string cleanText = SanitizeText(text);
+                Plugin.Log.LogInfo($"Tooltip after sanitize: '{cleanText}'");
+
                 if (string.IsNullOrEmpty(cleanText)) return;
 
                 // Avoid repeating the same tooltip too quickly (within 0.5s)
@@ -29,6 +34,7 @@ namespace MegabonkAccess
                 float currentTime = Time.unscaledTime;
                 if (cleanText == lastTooltip && (currentTime - lastTooltipTime) < 0.5f)
                 {
+                    Plugin.Log.LogInfo($"Tooltip skipped (duplicate): '{cleanText}'");
                     return;
                 }
 

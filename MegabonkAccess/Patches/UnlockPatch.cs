@@ -31,42 +31,57 @@ namespace MegabonkAccess
             {
                 Transform root = __instance.transform;
 
-                // Check if item is locked by looking for active requirements
+                // Check if item is locked
                 bool isLocked = HasActiveRequirements(root);
+
+                // Get name and description from transform hierarchy
+                string itemName = FindTextByObjectName(root, "t_unlockName");
+                string description = FindTextByObjectName(root, "t_unlockDescription");
 
                 StringBuilder sb = new StringBuilder();
 
                 if (isLocked)
                 {
-                    // Item is locked - read name and requirements only
-                    string name = FindTextByObjectName(root, "t_unlockName");
-                    if (!string.IsNullOrEmpty(name))
+                    if (!string.IsNullOrEmpty(itemName))
                     {
-                        sb.Append(name).Append(". ");
+                        sb.Append(itemName).Append(". ");
                     }
 
-                    sb.Append("Bloqueado. ");
+                    sb.Append("Locked. ");
 
-                    // Get requirements
                     string requirements = GetRequirementsText(root);
                     if (!string.IsNullOrEmpty(requirements))
                     {
-                        sb.Append("Para desbloquear: ").Append(requirements);
+                        sb.Append("To unlock: ").Append(requirements);
                     }
                 }
                 else
                 {
-                    // Item is unlocked - read texts that are NOT inside requirement containers
-                    var texts = GetTextsOutsideRequirements(root);
-                    foreach (var text in texts)
+                    // Unlocked - read name and description
+                    if (!string.IsNullOrEmpty(itemName))
                     {
-                        if (string.IsNullOrEmpty(text)) continue;
-                        if (text.Length < 4) continue;
-                        if (SkipTexts.Contains(text)) continue;
-                        if (HasGarbagePattern(text)) continue;
-                        if (IsProgressText(text)) continue;
+                        sb.Append(itemName).Append(". ");
+                    }
 
-                        sb.Append(text).Append(". ");
+                    if (!string.IsNullOrEmpty(description) && !HasGarbagePattern(description))
+                    {
+                        sb.Append(description).Append(". ");
+                    }
+
+                    // Fallback if no specific fields found
+                    if (string.IsNullOrEmpty(itemName) && string.IsNullOrEmpty(description))
+                    {
+                        var texts = GetTextsOutsideRequirements(root);
+                        foreach (var text in texts)
+                        {
+                            if (string.IsNullOrEmpty(text)) continue;
+                            if (text.Length < 4) continue;
+                            if (SkipTexts.Contains(text)) continue;
+                            if (HasGarbagePattern(text)) continue;
+                            if (IsProgressText(text)) continue;
+
+                            sb.Append(text).Append(". ");
+                        }
                     }
                 }
 
@@ -142,6 +157,8 @@ namespace MegabonkAccess
             {
                 // First try to find specific t_requirement text (the mission description)
                 string reqText = FindTextByObjectName(parent, "t_requirement");
+                reqText = RemoveGarbageFromText(reqText);
+
                 if (!string.IsNullOrEmpty(reqText) && !HasGarbagePattern(reqText))
                 {
                     if (sb.Length > 0) sb.Append(". ");
@@ -149,6 +166,7 @@ namespace MegabonkAccess
 
                     // Also get progress text
                     string progressText = FindTextByObjectName(parent, "t_progress");
+                    progressText = RemoveGarbageFromText(progressText);
                     if (!string.IsNullOrEmpty(progressText) && !HasGarbagePattern(progressText))
                     {
                         sb.Append(" (").Append(progressText).Append(")");
@@ -162,6 +180,7 @@ namespace MegabonkAccess
                     {
                         if (tmp == null) continue;
                         string text = SanitizeText(tmp.text);
+                        text = RemoveGarbageFromText(text);
                         if (string.IsNullOrEmpty(text) || text.Length < 3) continue;
                         if (HasGarbagePattern(text)) continue;
 
@@ -275,10 +294,43 @@ namespace MegabonkAccess
         private static bool HasGarbagePattern(string text)
         {
             if (string.IsNullOrEmpty(text)) return false;
-            if (Regex.IsMatch(text, @"([sd]{2,}\s*){3,}", RegexOptions.IgnoreCase)) return true;
-            if (Regex.IsMatch(text, @"([a-z]{1,2}\s+){5,}", RegexOptions.IgnoreCase)) return true;
-            if (Regex.IsMatch(text, @"[fsde]{3,}", RegexOptions.IgnoreCase)) return true;
+
+            // Only filter if the ENTIRE text is garbage
+            // Pattern 1: Multiple groups of 2+ s/d characters (like "sd sd sd")
+            if (Regex.IsMatch(text, @"^([sd]{2,}\s*){3,}$", RegexOptions.IgnoreCase)) return true;
+
+            // Pattern 2: Many single-letter words in a row (like "a b c d e f g")
+            if (Regex.IsMatch(text, @"^([a-z]{1,2}\s+){5,}$", RegexOptions.IgnoreCase)) return true;
+
+            // Pattern 3: Text is mostly fsde garbage
+            string lettersOnly = Regex.Replace(text, @"[^a-zA-Z]", "");
+            if (lettersOnly.Length > 5)
+            {
+                string fsdeOnly = Regex.Replace(lettersOnly, @"[^fsde]", "", RegexOptions.IgnoreCase);
+                if ((float)fsdeOnly.Length / lettersOnly.Length > 0.9f) return true;
+            }
+
             return false;
+        }
+
+        /// <summary>
+        /// Removes garbage text like "fsd fsdfesf efsdfes efs" from anywhere in the string.
+        /// Detects 2+ consecutive words made only of the letters f, s, d, e.
+        /// </summary>
+        private static string RemoveGarbageFromText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // Remove sequences of 2+ consecutive words made only of fsde letters
+            // Pattern: word boundary, 2+ letters of fsde, followed by one or more (space + fsde word)
+            text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.IgnoreCase);
+
+            // Clean up extra spaces and trailing/leading dots
+            text = Regex.Replace(text, @"\s+", " ");
+            text = Regex.Replace(text, @"\s+\.", ".");
+            text = Regex.Replace(text, @"\.\s*\.", ".");
+
+            return text.Trim();
         }
 
         private static bool IsProgressText(string text)
@@ -298,7 +350,46 @@ namespace MegabonkAccess
             string result = Regex.Replace(text, "<.*?>", string.Empty);
             result = Regex.Replace(result, @"[\r\n]+", " ");
             result = Regex.Replace(result, @"\s+", " ");
+            result = RemoveGarbageFromText(result);
             return result.Trim();
+        }
+
+        private static string GetRequirementText(Transform reqTransform)
+        {
+            if (reqTransform == null) return "";
+
+            StringBuilder sb = new StringBuilder();
+
+            // Try to find t_requirement text
+            var reqText = FindTextByObjectName(reqTransform, "t_requirement");
+            if (!string.IsNullOrEmpty(reqText))
+            {
+                sb.Append(reqText);
+
+                // Also get progress
+                var progressText = FindTextByObjectName(reqTransform, "t_progress");
+                if (!string.IsNullOrEmpty(progressText))
+                {
+                    sb.Append(" ").Append(progressText);
+                }
+            }
+            else
+            {
+                // Fallback: get all texts from this requirement
+                var texts = GetAllTextComponents(reqTransform);
+                foreach (var tmp in texts)
+                {
+                    if (tmp == null) continue;
+                    string text = SanitizeText(tmp.text);
+                    if (!string.IsNullOrEmpty(text) && text.Length > 2 && !HasGarbagePattern(text))
+                    {
+                        if (sb.Length > 0) sb.Append(" ");
+                        sb.Append(text);
+                    }
+                }
+            }
+
+            return sb.ToString();
         }
     }
 }

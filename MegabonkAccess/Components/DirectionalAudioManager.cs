@@ -121,6 +121,9 @@ namespace MegabonkAccess.Components
                 // Process any pending delayed speech (must run every frame)
                 TolkUtil.ProcessDelayedSpeech();
 
+                // Update encounter menu tracker
+                EncounterMenuTracker.Update();
+
                 // Check for scene change and clear beacons if needed
                 CheckSceneChange();
 
@@ -376,7 +379,6 @@ namespace MegabonkAccess.Components
                 {
                     // Solo usar posición de cámara, no para escanear jerarquía
                     playerTransform = cam.transform;
-                    Plugin.Log.LogDebug($"[DirectionalAudio] Using camera position (no player found)");
                 }
             }
             catch (Exception e)
@@ -1421,6 +1423,12 @@ namespace MegabonkAccess.Components
                 return true;
             }
 
+            // 3.5. EncounterMenuTracker - checks for shrine/encounter menus
+            if (EncounterMenuTracker.IsEncounterMenuOpen)
+            {
+                return true;
+            }
+
             // 4. DeathCamera check - cached reference
             try
             {
@@ -1472,7 +1480,6 @@ namespace MegabonkAccess.Components
             // No reproducir sonidos si hay un menú abierto
             if (IsMenuOpen())
             {
-                Plugin.Log.LogDebug("[DirectionalAudio] UpdateBeacons skipped - menu is open");
                 return;
             }
 
