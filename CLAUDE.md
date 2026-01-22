@@ -61,12 +61,12 @@ Accessibility is implemented as an **additional layer**, without altering the co
 
 #### Directional Audio Beacons
 
-**Status:** Functional with known issues
+**Status:** Functional
 
 ##### Implemented Features
 - 3D spatialized audio beacons for interactables
 - Different sounds/pitches per object type (chest, shrine, portal, urn, etc.)
-- Detection radius: 120 units
+- Detection radius: 200 units
 - Scene change cleanup
 - 4-second delay after scene load (skip intro cinematic)
 - Beacons removed after interaction (BaseInteractable.Interact patch)
@@ -74,6 +74,7 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - Sibling scanning: finds ALL interactables in same container (duplicates)
 - Proactive scanning: searches for objects by name patterns (Portal, Chest, Shrine, Pot, etc.)
 - Container scanning: searches common container objects for interactables
+- Specific chest scanning: `ScanAllChests()` searches for `InteractableChest` components directly
 
 ##### Menu Detection (sounds pause during menus)
 Detection methods in `IsMenuOpen()`:
@@ -86,14 +87,15 @@ Detection methods in `IsMenuOpen()`:
 - Death buttons: `B_Continue`, `ContinueButton`, `RestartButton`, `StatsButton`
 
 ##### Known Issues / TODO
-1. **Gold chests (cost 30 gold)**: Beacon only starts after hover, not proactively. `GameObject.Find("Chest(Clone)")` finds the chest but beacon doesn't play until hover triggers `RegisterDiscoveredInteractable()`. Need investigation.
+- None currently
 
 ##### Fixed Bugs
-1. **UI reading previous item**: Added delayed speech system (`ScheduleDelayedAction`) - waits 150ms for UI to update before reading
-2. **Generic patches interrupting specialized**: Coordination system (`SpeakFromSpecializedPatch`, `ShouldSkipGenericPatch`) blocks generic patches for 0.5s after specialized patch speaks
-3. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch, not just animation
-4. **Beacons during pause menu**: Added specific pause menu object detection
-5. **Beacons during death**: Restored `DeathCamera` check + death button detection
+1. **Gold chests not detected proactively**: The issue was that chests were found by `GameObject.Find()` but beacons weren't created because they were outside the detection radius. Fixed by removing distance check for chest beacon creation - chests now get beacons immediately when found, and sound only plays when player enters range. Added `ScanAllChests()` method with `ProcessChestObject()` that creates beacons without distance verification.
+2. **UI reading previous item**: Added delayed speech system (`ScheduleDelayedAction`) - waits 150ms for UI to update before reading
+3. **Generic patches interrupting specialized**: Coordination system (`SpeakFromSpecializedPatch`, `ShouldSkipGenericPatch`) blocks generic patches for 0.5s after specialized patch speaks
+4. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch, not just animation
+5. **Beacons during pause menu**: Added specific pause menu object detection
+6. **Beacons during death**: Restored `DeathCamera` check + death button detection
 
 ---
 
@@ -158,13 +160,10 @@ Objects/states that work for detection:
 
 ### Proactive Object Scanning
 Objects found proactively by `ScanRootObjectsByName()`:
-- Portal, Chest, BossSpawner
+- Portal, Chest (including gold chests), BossSpawner
 - ChargeShrine, Shrine variants
 - PotSmall, PotSmallSilver
 - Microwave, Boombox (music)
-
-Objects only found via hover (need fix):
-- Some gold chests (cost gold to open)
 
 ### Garbage Text in Game
 The game has placeholder text like "fsd fsdfesf efsdfes efs" in some UI elements. Use `RemoveGarbageText()` regex to clean:

@@ -4,6 +4,7 @@ using UnityEngine;
 using Il2CppInterop.Runtime.Injection;
 using Il2CppInterop.Runtime;
 using Assets.Scripts.Inventory__Items__Pickups.Pickups;
+using Assets.Scripts.Inventory__Items__Pickups.Chests;
 using MegabonkAccess;
 
 namespace MegabonkAccess.Components
@@ -30,7 +31,7 @@ namespace MegabonkAccess.Components
 
         // Configuracion
         private float scanInterval = 0.5f;
-        private float detectionRadius = 120f;  // Increased 150%
+        private float detectionRadius = 200f;
         private float nextScanTime = 0f;
         private float nextAudioSearchTime = 0f;
 
@@ -512,9 +513,11 @@ namespace MegabonkAccess.Components
             try
             {
                 var obj = GameObject.Find(objName);
+                string lowerName = objName.ToLower();
+                bool isChest = lowerName.Contains("chest");
 
                 // Debug logging for chest specifically (every 100 scans)
-                if (objName.ToLower().Contains("chest"))
+                if (isChest)
                 {
                     chestDebugCounter++;
                     if (chestDebugCounter % 100 == 1)
@@ -534,14 +537,28 @@ namespace MegabonkAccess.Components
                 // Skip if already interacted
                 if (interactedObjects.Contains(id)) return;
 
-                float distance = Vector3.Distance(playerPos, obj.transform.position);
-                if (distance <= detectionRadius)
+                // Para cofres, usar ProcessChestObject que NO verifica distancia
+                if (isChest)
                 {
-                    string type = IdentifyType(objName.ToLower());
-                    if (type != "unknown")
+                    ProcessChestObject(obj, playerPos);
+                    // También escanear contenedor padre para encontrar más cofres
+                    if (obj.transform.parent != null)
                     {
-                        CreateBeacon(obj, type, id);
-                        Plugin.Log.LogInfo($"[DirectionalAudio] PROACTIVE found: {objName} -> {type} at dist {distance:F0}");
+                        ScanContainerForChests(obj.transform.parent, playerPos, 0, 2);
+                    }
+                }
+                else
+                {
+                    // Para otros objetos, verificar distancia
+                    float distance = Vector3.Distance(playerPos, obj.transform.position);
+                    if (distance <= detectionRadius)
+                    {
+                        string type = IdentifyType(lowerName);
+                        if (type != "unknown")
+                        {
+                            CreateBeacon(obj, type, id);
+                            Plugin.Log.LogInfo($"[DirectionalAudio] PROACTIVE found: {objName} -> {type} at dist {distance:F0}");
+                        }
                     }
                 }
 
@@ -679,6 +696,9 @@ namespace MegabonkAccess.Components
 
                 // Búsqueda específica de todos los Pickups activos en la escena
                 ScanAllPickups(playerPos);
+
+                // Búsqueda específica de todos los cofres (incluyendo gold chests)
+                ScanAllChests(playerPos);
 
                 // Escanear contenedores conocidos de interactables
                 ScanInteractableContainers(playerPos);
@@ -837,6 +857,177 @@ namespace MegabonkAccess.Components
             catch (Exception e)
             {
                 Plugin.Log.LogDebug($"[DirectionalAudio] ScanAllPickups error: {e.Message}");
+            }
+        }
+
+        // Counter for ScanAllChests logging
+        private static int chestScanCounter = 0;
+
+        /// <summary>
+        /// Búsqueda específica y agresiva de todos los cofres (incluyendo gold chests).
+        /// Los gold chests son InteractableChest con precio > 0.
+        /// </summary>
+        private void ScanAllChests(Vector3 playerPos)
+        {
+            try
+            {
+                chestScanCounter++;
+                // Log every 50 scans to confirm method is running
+                if (chestScanCounter % 50 == 1)
+                {
+                    Plugin.Log.LogInfo($"[DirectionalAudio] ScanAllChests running (scan #{chestScanCounter})");
+                }
+
+                // Patrones de nombres para buscar cofres
+                string[] chestPatterns = {
+                    "Chest", "Chest(Clone)", "Chest (Clone)",
+                    "GoldChest", "GoldChest(Clone)", "GoldChest (Clone)",
+                    "InteractableChest", "InteractableChest(Clone)"
+                };
+
+                foreach (var pattern in chestPatterns)
+                {
+                    try
+                    {
+                        var chest = GameObject.Find(pattern);
+                        if (chest != null && chest.activeInHierarchy)
+                        {
+                            // Procesar este cofre
+                            ProcessChestObject(chest, playerPos);
+
+                            // IMPORTANTE: Escanear el contenedor padre para encontrar TODOS los cofres
+                            // incluyendo gold chests que podrían no aparecer con GameObject.Find
+                            if (chest.transform.parent != null)
+                            {
+                                ScanContainerForChests(chest.transform.parent, playerPos, 0, 2);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                // También buscar en contenedores específicos de cofres
+                string[] chestContainers = { "Chests", "Interactables", "Objects", "Spawned", "Generated" };
+                foreach (var containerName in chestContainers)
+                {
+                    try
+                    {
+                        var container = GameObject.Find(containerName);
+                        if (container != null)
+                        {
+                            ScanContainerForChests(container.transform, playerPos, 0, 3);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[DirectionalAudio] ScanAllChests error: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Escanea un contenedor específicamente buscando objetos con componente InteractableChest.
+        /// </summary>
+        private void ScanContainerForChests(Transform container, Vector3 playerPos, int depth, int maxDepth)
+        {
+            if (container == null || depth > maxDepth) return;
+
+            try
+            {
+                int childCount = container.childCount;
+                for (int i = 0; i < childCount; i++)
+                {
+                    try
+                    {
+                        var child = container.GetChild(i);
+                        if (child == null || !child.gameObject.activeInHierarchy) continue;
+
+                        var childObj = child.gameObject;
+
+                        // Procesar si parece un cofre (por nombre o componente)
+                        string lowerName = childObj.name.ToLower();
+                        if (lowerName.Contains("chest"))
+                        {
+                            ProcessChestObject(childObj, playerPos);
+                        }
+                        else
+                        {
+                            // También verificar si tiene el componente InteractableChest
+                            var chestComponent = childObj.GetComponent<InteractableChest>();
+                            if (chestComponent != null)
+                            {
+                                ProcessChestObject(childObj, playerPos);
+                            }
+                        }
+
+                        // Recursión para hijos
+                        if (child.childCount > 0)
+                        {
+                            ScanContainerForChests(child, playerPos, depth + 1, maxDepth);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Procesa un objeto cofre específico y crea un beacon si es válido.
+        /// NOTA: No verificamos distancia aquí - los cofres son importantes y deben tener beacon siempre.
+        /// La distancia se verifica en UpdateBeacons al reproducir el sonido.
+        /// </summary>
+        private void ProcessChestObject(GameObject obj, Vector3 playerPos)
+        {
+            if (obj == null || !obj.activeInHierarchy) return;
+
+            int id = obj.GetInstanceID();
+            if (activeBeacons.ContainsKey(id) || interactedObjects.Contains(id)) return;
+
+            try
+            {
+                float distance = Vector3.Distance(playerPos, obj.transform.position);
+
+                // Verificar si tiene el componente InteractableChest
+                var chest = obj.GetComponent<InteractableChest>();
+                if (chest == null)
+                {
+                    // También verificar como BaseInteractable genérico
+                    var interactable = obj.GetComponent<BaseInteractable>();
+                    if (interactable == null)
+                    {
+                        Plugin.Log.LogDebug($"[DirectionalAudio] Chest object {obj.name} has no InteractableChest or BaseInteractable component");
+                        return;
+                    }
+
+                    // Si tiene BaseInteractable y el nombre contiene "chest", crear beacon SIN verificar distancia
+                    if (obj.name.ToLower().Contains("chest"))
+                    {
+                        CreateBeacon(obj, "chest", id);
+                        Plugin.Log.LogInfo($"[DirectionalAudio] CHEST FOUND (BaseInteractable): {obj.name} at distance {distance:F0}");
+                    }
+                    return;
+                }
+
+                // Tiene InteractableChest - crear beacon SIN verificar distancia
+                // Log información del cofre
+                try
+                {
+                    var chestType = chest.chestType;
+                    Plugin.Log.LogInfo($"[DirectionalAudio] CHEST FOUND (InteractableChest): {obj.name}, Type: {chestType}, Distance: {distance:F0}");
+                }
+                catch
+                {
+                    Plugin.Log.LogInfo($"[DirectionalAudio] CHEST FOUND (InteractableChest): {obj.name}, Distance: {distance:F0}");
+                }
+
+                CreateBeacon(obj, "chest", id);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[DirectionalAudio] ProcessChestObject error for {obj?.name}: {e.Message}");
             }
         }
 
