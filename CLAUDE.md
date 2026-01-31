@@ -20,11 +20,16 @@ Accessibility is implemented as an **additional layer**, without altering the co
   - `Plugin.cs` - Entry point
   - `TolkUtil.cs` - Screen reader wrapper + coordination system
   - `Patches/` - Harmony patches for game hooks
-  - `Components/` - Custom Unity components (DirectionalAudioManager)
+  - `Components/` - Custom Unity components
+    - `DirectionalAudioManager.cs` - Beacon tracking and scheduling
+    - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio playback
 
 ### References
 - `/references/` - Game assemblies and dependencies
 - `TolkDotNet.dll` + `Tolk.dll` - Screen reader support (NVDA, JAWS, SAPI)
+
+### Audio Assets
+- `MegabonkAccess/sounds/beacon.wav` - Custom beacon sound file
 
 ### Game Location
 - `D:\games\steam\steamapps\common\Megabonk\`
@@ -65,9 +70,30 @@ Accessibility is implemented as an **additional layer**, without altering the co
 
 **Status:** Functional
 
-##### Implemented Features
-- 3D spatialized audio beacons for interactables
-- Different sounds/pitches per object type (chest, shrine, portal, urn, etc.)
+##### Audio System: NAudio
+Uses **NAudio** library instead of Unity's AudioSource for better control over 3D audio.
+
+**Why NAudio:**
+- Independent of Unity's audio system (avoids IL2CPP issues)
+- Precise control over pan, volume, and pitch
+- Custom sound files instead of game sounds
+
+**NAudioBeaconPlayer features:**
+- Stereo panning based on object position relative to player/camera
+- Volume scaling based on distance (quadratic curve)
+- Pitch shifting based on distance (closer = higher pitch)
+- Pool of 12 concurrent sound players
+- Runs audio on separate thread to avoid blocking Unity
+
+**Distance-based effects (quadratic curves for dramatic changes):**
+| Effect | Far | Close |
+|--------|-----|-------|
+| Volume | 10% | 100% |
+| Pitch | 0.6x (low) | 1.6x (high) |
+| Interval | 2.0x base (slow) | 0.15x base (fast) |
+| Pan | Full stereo separation based on angle |
+
+##### Beacon Detection Features
 - Detection radius: 200 units
 - Scene change cleanup
 - 4-second delay after scene load (skip intro cinematic)
@@ -257,7 +283,8 @@ private static bool IsProgressText(string text)
 - `ChestWindowUiPatch.cs` - Chest contents + ChestAnimationTracker + window open/close
 
 ### Components
-- `DirectionalAudioManager.cs` - 3D audio beacon system
+- `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
+- `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search
@@ -274,11 +301,20 @@ dotnet build --configuration Release
 
 Auto-copies to: `D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\`
 
+**Files deployed:**
+- `MegabonkAccess.dll` - Main plugin
+- `NAudio.dll`, `NAudio.Core.dll`, `NAudio.Wasapi.dll`, `NAudio.WinMM.dll` - Audio library
+- `TolkDotNet.dll` - Screen reader wrapper
+- `sounds/beacon.wav` - Beacon sound file
+- `Tolk.dll`, `nvdaControllerClient64.dll` - To game root folder
+
 ---
 
 ## Notes
 
 - This is an IL2CPP game (Unity 2023.2.22f1)
 - Screen reader support requires Tolk.dll in game root folder
+- NAudio requires .NET 6.0 runtime (included with BepInEx IL2CPP)
 - Test with BepInEx console or LogOutput.log for debugging
 - Decompiled game code in `megabonk code/` folder for reference
+- Beacon sound file should be mono or stereo WAV (converted to mono internally for panning)

@@ -11,18 +11,17 @@ namespace MegabonkAccess.Components
 {
     /// <summary>
     /// Sistema de audio direccional 3D para interactuables.
-    /// Accede directamente al AudioManager del juego para obtener clips.
+    /// Usa NAudio para reproducción de audio 3D con pan y volumen.
     /// </summary>
     public class DirectionalAudioManager : MonoBehaviour
     {
         public static DirectionalAudioManager Instance { get; private set; }
 
-        // AudioClips del juego - diferentes para cada tipo
-        private Dictionary<string, AudioClip> typeClips = new Dictionary<string, AudioClip>();
-        private AudioClip defaultClip = null;
+        // NAudio beacon player
+        private NAudioBeaconPlayer naudioPlayer = null;
         private bool audioReady = false;
 
-        // Pool de beacons activos
+        // Pool de beacons activos (sin AudioSource de Unity)
         private Dictionary<int, AudioBeaconData> activeBeacons = new Dictionary<int, AudioBeaconData>();
         // Track positions to avoid duplicates
         private HashSet<string> activePositions = new HashSet<string>();
@@ -33,10 +32,10 @@ namespace MegabonkAccess.Components
         private float scanInterval = 0.5f;
         private float detectionRadius = 200f;
         private float nextScanTime = 0f;
-        private float nextAudioSearchTime = 0f;
 
         // Jugador
         private Transform playerTransform = null;
+        private Transform cameraTransform = null;  // Para obtener la dirección forward
         private float nextPlayerSearchTime = 0f;
 
         // Scene tracking
@@ -74,8 +73,7 @@ namespace MegabonkAccess.Components
         private class AudioBeaconData
         {
             public GameObject Target;
-            public GameObject AudioObject;
-            public AudioSource Source;
+            public Vector3 LastKnownPosition;  // Posición para cuando el target sea destruido
             public string Type;
             public float NextPlayTime;
             public float Pitch;
@@ -108,7 +106,23 @@ namespace MegabonkAccess.Components
 
         void Start()
         {
-            Plugin.Log.LogInfo("[DirectionalAudio] Started - searching for game audio...");
+            Plugin.Log.LogInfo("[DirectionalAudio] Started - initializing NAudio...");
+            InitializeNAudio();
+        }
+
+        private void InitializeNAudio()
+        {
+            try
+            {
+                naudioPlayer = NAudioBeaconPlayer.Instance;
+                audioReady = true;
+                Plugin.Log.LogInfo("[DirectionalAudio] NAudio initialized successfully");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError($"[DirectionalAudio] Failed to initialize NAudio: {e.Message}");
+                audioReady = false;
+            }
         }
 
         // Para logging periódico
@@ -126,20 +140,6 @@ namespace MegabonkAccess.Components
 
                 // Check for scene change and clear beacons if needed
                 CheckSceneChange();
-
-                // Verificar si los clips siguen siendo válidos
-                if (audioReady && defaultClip == null && typeClips.Count == 0)
-                {
-                    Plugin.Log.LogWarning("[DirectionalAudio] AudioClips were lost, searching again...");
-                    audioReady = false;
-                }
-
-                // Buscar AudioClip del juego si no tenemos uno
-                if (!audioReady && Time.time >= nextAudioSearchTime)
-                {
-                    SearchForGameAudio();
-                    nextAudioSearchTime = Time.time + 2f;
-                }
 
                 if (!audioReady) return;
 
@@ -166,7 +166,7 @@ namespace MegabonkAccess.Components
                 // Log de estado periódico
                 if (Time.time >= nextStatusLogTime)
                 {
-                    Plugin.Log.LogInfo($"[DirectionalAudio] Status: {activeBeacons.Count} beacons active, clips: {typeClips.Count}");
+                    Plugin.Log.LogInfo($"[DirectionalAudio] Status: {activeBeacons.Count} beacons active (NAudio)");
                     nextStatusLogTime = Time.time + 10f;
                 }
             }
@@ -194,151 +194,10 @@ namespace MegabonkAccess.Components
 
         private void ClearAllBeacons()
         {
-            foreach (var beacon in activeBeacons.Values)
-            {
-                try
-                {
-                    if (beacon?.AudioObject != null)
-                    {
-                        UnityEngine.Object.Destroy(beacon.AudioObject);
-                    }
-                }
-                catch { }
-            }
             activeBeacons.Clear();
             activePositions.Clear();
             interactedObjects.Clear();  // Reset interacted objects on scene change
             Plugin.Log.LogInfo("[DirectionalAudio] All beacons cleared");
-        }
-
-        private void SearchForGameAudio()
-        {
-            try
-            {
-                Plugin.Log.LogInfo("[DirectionalAudio] Searching for AudioSources by GameObject name...");
-
-                var audioManager = GameObject.Find("AudioManager");
-                if (audioManager == null)
-                {
-                    Plugin.Log.LogWarning("[DirectionalAudio] AudioManager not found yet...");
-                    return;
-                }
-
-                Plugin.Log.LogInfo("[DirectionalAudio] Found AudioManager, scanning children for clips...");
-
-                // Buscar todos los hijos del AudioManager para obtener clips
-                for (int i = 0; i < audioManager.transform.childCount; i++)
-                {
-                    var child = audioManager.transform.GetChild(i);
-                    if (child == null) continue;
-
-                    var source = child.GetComponent<AudioSource>();
-                    if (source == null || source.clip == null) continue;
-
-                    string childName = child.name.ToLower();
-                    string clipName = source.clip.name;
-
-                    Plugin.Log.LogInfo($"[DirectionalAudio] Found clip: {childName} -> {clipName}");
-
-                    // Asignar clips a tipos según el nombre del hijo
-                    if (childName.Contains("gold"))
-                    {
-                        typeClips["gold"] = source.clip;
-                        // Cofres NO usan sonido de oro para distinguirlos
-                    }
-                    else if (childName.Contains("silver"))
-                    {
-                        typeClips["shrine"] = source.clip;  // Santuarios usan plata
-                        typeClips["npc"] = source.clip;
-                    }
-                    else if (childName.Contains("bullseye"))
-                    {
-                        typeClips["chest"] = source.clip;  // Cofres usan bullseye (distintivo)
-                    }
-                    else if (childName.Contains("xp"))
-                    {
-                        typeClips["health"] = source.clip;  // Hamburguesas usan XP
-                        typeClips["urn"] = source.clip;     // Urnas usan XP
-                        if (defaultClip == null)
-                            defaultClip = source.clip;
-                    }
-                    // Skip dungeon/door sound - it's confusing at game start
-                    // Portal will use silver sound instead (assigned below)
-                }
-
-                // Portal uses silver sound (less intrusive than dungeon door)
-                if (!typeClips.ContainsKey("portal") && typeClips.ContainsKey("shrine"))
-                {
-                    typeClips["portal"] = typeClips["shrine"];  // Silver sound
-                }
-                else if (!typeClips.ContainsKey("portal") && defaultClip != null)
-                {
-                    typeClips["portal"] = defaultClip;
-                }
-
-                // Asignar clip por defecto para música
-                if (!typeClips.ContainsKey("music") && typeClips.ContainsKey("gold"))
-                {
-                    typeClips["music"] = typeClips["gold"];
-                }
-
-                // Asignar clips para pickups usando los clips existentes
-                // XP pickups usan el sonido de XP (si existe) o default
-                if (typeClips.ContainsKey("health"))
-                {
-                    typeClips["pickup_xp"] = typeClips["health"];
-                    typeClips["pickup_health"] = typeClips["health"];
-                }
-                else if (defaultClip != null)
-                {
-                    typeClips["pickup_xp"] = defaultClip;
-                    typeClips["pickup_health"] = defaultClip;
-                }
-
-                // Gold pickups usan sonido de gold
-                if (typeClips.ContainsKey("gold"))
-                {
-                    typeClips["pickup_gold"] = typeClips["gold"];
-                }
-                else if (defaultClip != null)
-                {
-                    typeClips["pickup_gold"] = defaultClip;
-                }
-
-                // Silver pickups usan sonido de shrine/silver
-                if (typeClips.ContainsKey("shrine"))
-                {
-                    typeClips["pickup_silver"] = typeClips["shrine"];
-                }
-                else if (defaultClip != null)
-                {
-                    typeClips["pickup_silver"] = defaultClip;
-                }
-
-                // Special pickups usan sonido de chest (más distintivo)
-                if (typeClips.ContainsKey("chest"))
-                {
-                    typeClips["pickup_special"] = typeClips["chest"];
-                }
-                else if (defaultClip != null)
-                {
-                    typeClips["pickup_special"] = defaultClip;
-                }
-
-                if (defaultClip != null || typeClips.Count > 0)
-                {
-                    audioReady = true;
-                    Plugin.Log.LogInfo($"[DirectionalAudio] Audio ready! Found {typeClips.Count} type-specific clips (including pickups)");
-                }
-                else
-                {
-                    Plugin.Log.LogWarning("[DirectionalAudio] No AudioClips found yet, will retry...");
-                }
-            }
-            catch (Exception e)
-            {
-                Plugin.Log.LogError($"[DirectionalAudio] SearchForGameAudio error: {e.Message}");
-            }
         }
 
         private string lastPlayerName = "";
@@ -369,16 +228,21 @@ namespace MegabonkAccess.Components
                             hierarchyLogged = false; // Forzar re-log
                             Plugin.Log.LogInfo($"[DirectionalAudio] Found player object: {name}");
                         }
-                        return;
+                        break;
                     }
                 }
 
-                // NO usar la cámara como fallback - solo la posición para audio
+                // Siempre buscar la cámara para la dirección forward
                 var cam = Camera.main;
-                if (cam != null && playerTransform == null)
+                if (cam != null)
                 {
-                    // Solo usar posición de cámara, no para escanear jerarquía
-                    playerTransform = cam.transform;
+                    cameraTransform = cam.transform;
+
+                    // Si no encontramos jugador, usar posición de la cámara
+                    if (playerTransform == null)
+                    {
+                        playerTransform = cam.transform;
+                    }
                 }
             }
             catch (Exception e)
@@ -1331,45 +1195,16 @@ namespace MegabonkAccess.Components
                 return; // Already have a beacon at this position
             }
 
-            // Obtener clip específico para este tipo, o usar el default
-            AudioClip clipToUse = null;
-            if (typeClips.ContainsKey(type))
-                clipToUse = typeClips[type];
-            else if (defaultClip != null)
-                clipToUse = defaultClip;
-
-            if (clipToUse == null) return;
-
             try
             {
                 // Obtener configuración para este tipo
                 var config = typeConfigs.ContainsKey(type) ? typeConfigs[type] : typeConfigs["default"];
 
-                // Crear GameObject con AudioSource en la posición del objetivo
-                var audioObj = new GameObject($"Beacon_{type}_{id}");
-                audioObj.transform.position = pos;
-
-                // NO usar DontDestroyOnLoad para los beacons individuales
-                // Esto permite que se limpien naturalmente con la escena
-
-                var source = audioObj.AddComponent<AudioSource>();
-                source.clip = clipToUse;
-                source.spatialBlend = 1.0f;  // 100% 3D
-                source.rolloffMode = AudioRolloffMode.Linear;
-                source.minDistance = 1f;
-                source.maxDistance = detectionRadius;
-                source.dopplerLevel = 0f;
-                source.spread = 60f;
-                source.pitch = config.pitch;
-                source.volume = config.volume;
-                source.loop = false;
-                source.playOnAwake = false;
-
+                // Crear beacon sin AudioSource de Unity - NAudio maneja el audio
                 var beacon = new AudioBeaconData
                 {
                     Target = target,
-                    AudioObject = audioObj,
-                    Source = source,
+                    LastKnownPosition = pos,
                     Type = type,
                     Pitch = config.pitch,
                     Interval = config.interval,
@@ -1380,7 +1215,7 @@ namespace MegabonkAccess.Components
 
                 activeBeacons[id] = beacon;
                 activePositions.Add(posKey);
-                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon for {type} at {pos} (clip: {clipToUse.name})");
+                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon for {type} at {pos}");
             }
             catch (Exception e)
             {
@@ -1469,7 +1304,7 @@ namespace MegabonkAccess.Components
 
         private void UpdateBeacons()
         {
-            if (playerTransform == null || !audioReady) return;
+            if (playerTransform == null || !audioReady || naudioPlayer == null) return;
 
             // Wait for scene start delay (cinematic/intro)
             if (Time.time - sceneLoadTime < sceneStartDelay)
@@ -1484,69 +1319,53 @@ namespace MegabonkAccess.Components
             }
 
             Vector3 playerPos = playerTransform.position;
+            Vector3 playerForward = cameraTransform != null ? cameraTransform.forward : playerTransform.forward;
 
             foreach (var kvp in activeBeacons)
             {
                 var beacon = kvp.Value;
-                if (beacon == null || beacon.Source == null || beacon.AudioObject == null) continue;
+                if (beacon == null) continue;
 
                 try
                 {
+                    // Obtener posición del beacon
+                    Vector3 beaconPos = beacon.LastKnownPosition;
+
                     // Intentar actualizar posición desde el Target si existe
                     try
                     {
-                        if (beacon.Target != null)
+                        if (beacon.Target != null && beacon.Target.activeInHierarchy)
                         {
-                            var targetPos = beacon.Target.transform.position;
-                            beacon.AudioObject.transform.position = targetPos;
+                            beaconPos = beacon.Target.transform.position;
+                            beacon.LastKnownPosition = beaconPos;
                         }
                     }
                     catch
                     {
-                        // Target fue destruido, pero seguimos usando la última posición conocida
+                        // Target fue destruido, usar última posición conocida
                     }
-
-                    // Usar la posición actual del AudioObject (última conocida)
-                    var beaconPos = beacon.AudioObject.transform.position;
 
                     // Calcular distancia
                     float distance = Vector3.Distance(playerPos, beaconPos);
                     if (distance > detectionRadius) continue;
 
-                    // Verificar que el AudioSource tenga clip - usar el clip específico del tipo
-                    if (beacon.Source.clip == null)
-                    {
-                        if (typeClips.ContainsKey(beacon.Type))
-                            beacon.Source.clip = typeClips[beacon.Type];
-                        else if (defaultClip != null)
-                            beacon.Source.clip = defaultClip;
-                    }
-
-                    // Intervalo dinámico basado en distancia
-                    float dynamicInterval = beacon.Interval * (0.3f + (distance / detectionRadius) * 0.7f);
+                    // Intervalo dinámico: más cerca = más rápido
+                    float dynamicInterval = NAudioBeaconPlayer.CalculateInterval(distance, detectionRadius, beacon.Interval);
 
                     // Reproducir si es tiempo
                     if (Time.time >= beacon.NextPlayTime)
                     {
-                        // Verificar que todo siga válido antes de reproducir
-                        if (beacon.Source.clip == null)
-                        {
-                            Plugin.Log.LogWarning($"[DirectionalAudio] Beacon {beacon.Type} lost clip, reassigning...");
-                            if (typeClips.ContainsKey(beacon.Type))
-                                beacon.Source.clip = typeClips[beacon.Type];
-                            else if (defaultClip != null)
-                                beacon.Source.clip = defaultClip;
-                        }
+                        // Reproducir con NAudio (pitch, volumen y pan se calculan internamente basado en distancia)
+                        naudioPlayer.PlayBeacon(
+                            playerPos,
+                            playerForward,
+                            beaconPos,
+                            detectionRadius,
+                            beacon.Volume,
+                            beacon.Pitch
+                        );
 
-                        if (beacon.Source.clip != null)
-                        {
-                            beacon.Source.Play();
-                            Plugin.Log.LogDebug($"[DirectionalAudio] Playing {beacon.Type} (clip: {beacon.Source.clip.name}) at dist {distance:F0}");
-                        }
-                        else
-                        {
-                            Plugin.Log.LogWarning($"[DirectionalAudio] Beacon {beacon.Type} has no clip!");
-                        }
+                        Plugin.Log.LogDebug($"[DirectionalAudio] Playing {beacon.Type} at dist {distance:F0}, interval {dynamicInterval:F2}s");
                         beacon.NextPlayTime = Time.time + dynamicInterval;
                     }
                 }
@@ -1573,34 +1392,12 @@ namespace MegabonkAccess.Components
                         continue;
                     }
 
-                    // Verificar si nuestro AudioObject sigue existiendo
-                    try
-                    {
-                        if (beacon.AudioObject == null)
-                        {
-                            toRemove.Add(kvp.Key);
-                            continue;
-                        }
-                        // Intentar acceder - si falla, nuestro objeto fue destruido
-                        var _ = beacon.AudioObject.transform.position;
-                    }
-                    catch
-                    {
-                        toRemove.Add(kvp.Key);
-                        continue;
-                    }
-
-                    // IMPORTANTE: Verificar si el Target fue destruido o desactivado
-                    // Esto aplica a TODOS los beacons, no solo pickups
+                    // Verificar si el Target fue destruido o desactivado
                     try
                     {
                         if (beacon.Target == null || !beacon.Target.activeInHierarchy)
                         {
                             // Target fue destruido o desactivado, eliminar beacon
-                            if (beacon.AudioObject != null)
-                            {
-                                UnityEngine.Object.Destroy(beacon.AudioObject);
-                            }
                             if (!string.IsNullOrEmpty(beacon.PosKey))
                             {
                                 activePositions.Remove(beacon.PosKey);
@@ -1611,7 +1408,6 @@ namespace MegabonkAccess.Components
                         }
 
                         // Verificar si el interactable ya no puede ser interactuado (fue usado)
-                        // Esto captura casos como BossSpawner que permanece activo pero ya fue usado
                         if (!beacon.Type.StartsWith("pickup_"))
                         {
                             var interactable = beacon.Target.GetComponent<BaseInteractable>();
@@ -1621,11 +1417,6 @@ namespace MegabonkAccess.Components
                                 {
                                     if (!interactable.CanInteract())
                                     {
-                                        // El interactable ya no puede ser usado, eliminar beacon
-                                        if (beacon.AudioObject != null)
-                                        {
-                                            UnityEngine.Object.Destroy(beacon.AudioObject);
-                                        }
                                         if (!string.IsNullOrEmpty(beacon.PosKey))
                                         {
                                             activePositions.Remove(beacon.PosKey);
@@ -1642,44 +1433,12 @@ namespace MegabonkAccess.Components
                     catch
                     {
                         // Target fue destruido, eliminar beacon
-                        if (beacon.AudioObject != null)
-                        {
-                            try { UnityEngine.Object.Destroy(beacon.AudioObject); } catch { }
-                        }
                         if (!string.IsNullOrEmpty(beacon.PosKey))
                         {
                             activePositions.Remove(beacon.PosKey);
                         }
                         toRemove.Add(kvp.Key);
                         continue;
-                    }
-
-                    // Verificación adicional para pickups
-                    if (beacon.Type.StartsWith("pickup_"))
-                    {
-                        try
-                        {
-                            // Si el target es null o fue destruido, eliminar beacon
-                            if (beacon.Target == null || !beacon.Target.activeInHierarchy)
-                            {
-                                if (beacon.AudioObject != null)
-                                {
-                                    UnityEngine.Object.Destroy(beacon.AudioObject);
-                                }
-                                toRemove.Add(kvp.Key);
-                                Plugin.Log.LogDebug($"[DirectionalAudio] Removed beacon for collected/destroyed pickup");
-                                continue;
-                            }
-                        }
-                        catch
-                        {
-                            // El objeto fue destruido, eliminar beacon
-                            if (beacon.AudioObject != null)
-                            {
-                                try { UnityEngine.Object.Destroy(beacon.AudioObject); } catch { }
-                            }
-                            toRemove.Add(kvp.Key);
-                        }
                     }
                 }
                 catch
@@ -1694,12 +1453,11 @@ namespace MegabonkAccess.Components
                 {
                     if (activeBeacons.TryGetValue(id, out var beacon))
                     {
-                        // Remove position from tracking
                         if (!string.IsNullOrEmpty(beacon?.PosKey))
                         {
                             activePositions.Remove(beacon.PosKey);
                         }
-                        Plugin.Log.LogInfo($"[DirectionalAudio] Removed beacon (AudioObject destroyed): {beacon?.Type}");
+                        Plugin.Log.LogInfo($"[DirectionalAudio] Removed beacon: {beacon?.Type}");
                     }
                 }
                 catch { }
@@ -1778,10 +1536,6 @@ namespace MegabonkAccess.Components
                 // Quitar beacon si existe
                 if (activeBeacons.TryGetValue(id, out var beacon))
                 {
-                    if (beacon?.AudioObject != null)
-                    {
-                        UnityEngine.Object.Destroy(beacon.AudioObject);
-                    }
                     if (!string.IsNullOrEmpty(beacon?.PosKey))
                     {
                         activePositions.Remove(beacon.PosKey);
@@ -1798,18 +1552,16 @@ namespace MegabonkAccess.Components
 
         void OnDestroy()
         {
-            foreach (var beacon in activeBeacons.Values)
-            {
-                try
-                {
-                    if (beacon?.AudioObject != null)
-                    {
-                        Destroy(beacon.AudioObject);
-                    }
-                }
-                catch { }
-            }
             activeBeacons.Clear();
+            activePositions.Clear();
+
+            // Limpiar NAudio
+            try
+            {
+                naudioPlayer?.Dispose();
+            }
+            catch { }
+
             Instance = null;
             Plugin.Log.LogInfo("[DirectionalAudio] Destroyed");
         }
