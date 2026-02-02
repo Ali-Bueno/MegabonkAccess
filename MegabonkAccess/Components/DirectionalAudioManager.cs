@@ -1421,9 +1421,11 @@ namespace MegabonkAccess.Components
                         }
 
                         // Verificar si el interactable ya no puede ser interactuado (fue usado)
-                        // SKIP para beacons Ambient (portales) - pueden tener CanInteract=false pero aún deben sonar
                         // SKIP para pickups - se manejan diferente
-                        if (!beacon.Type.StartsWith("pickup_") && beacon.Behavior != AudioBehavior.Ambient)
+                        // SKIP para portales - deben seguir sonando hasta que el jugador entre
+                        // Los shrines SÍ deben eliminarse cuando CanInteract=false (solo se usan una vez)
+                        bool isPortal = beacon.Type == "portal" || beacon.Type == "boss_portal";
+                        if (!beacon.Type.StartsWith("pickup_") && !isPortal)
                         {
                             var interactable = beacon.Target.GetComponent<BaseInteractable>();
                             if (interactable != null)

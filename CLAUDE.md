@@ -192,8 +192,9 @@ Uses **NAudio** library instead of Unity's AudioSource for better control over 3
 - Scene change cleanup
 - 4-second delay after scene load (skip intro cinematic)
 - Beacons removed after interaction (BaseInteractable.Interact patch)
-- Beacons removed when `CanInteract()` returns false (catches used objects) - **except Ambient beacons**
-- Ambient beacons persist even if Target is destroyed (continue playing at last known position)
+- Beacons removed when `CanInteract()` returns false (catches used objects) - **except portals**
+- Shrine ambient sounds stop after interaction (one-time use objects)
+- Portal ambient beacons persist until player enters (continue playing at last known position)
 - Sibling scanning: finds ALL interactables in same container (duplicates)
 - Proactive scanning: searches for objects by name patterns (Portal, Chest, Shrine, Pot, etc.)
 - Container scanning: searches common container objects for interactables
@@ -230,6 +231,7 @@ Detection methods in `IsMenuOpen()`:
 11. **Ambient sounds recreating during menu flicker**: Changed from Stop/Recreate to Pause/Resume.
 12. **Ambient beacons removed when target destroyed**: Skip removal for Ambient behavior beacons.
 13. **Localized text breaking detection**: Removed all localized text checks, use only object/component names.
+14. **Shrine sounds persisting after use**: Shrine ambient beacons now removed when `CanInteract()` is false (portals excluded).
 
 ---
 
