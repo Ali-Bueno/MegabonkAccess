@@ -32,10 +32,10 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - `MegabonkAccess/sounds/` - Audio cue sound files
   - `beacon.wav` - Default/fallback beacon sound
   - `chests.mp3` - Chest sound (beacon behavior)
-  - `shrines.mp3` - Shrine sound (beacon behavior)
+  - `shrines.mp3` - Shrine sound (ambient loop)
   - `portal.mp3` - Portal sound (ambient loop)
-  - `boombox.mp3` - Boombox NPC (ambient loop)
-  - `microwave.mp3` - Microwave NPC (ambient loop)
+  - `boombox.mp3` - Boombox NPC (beacon behavior)
+  - `microwave.mp3` - Microwave NPC (beacon behavior)
 
 ### Game Location
 - `D:\games\steam\steamapps\common\Megabonk\`
@@ -43,62 +43,98 @@ Accessibility is implemented as an **additional layer**, without altering the co
 
 ---
 
-## Current Priority Task
+## Audio System
 
-### Multi-Sound Audio System with Distinct Behaviors
-
-**Status:** Functional
-
-**Goal:** Multiple distinct sounds with unique audio behaviors based on object type.
-
-#### Audio Behavior Types
+### Audio Behavior Types
 
 | Behavior | Loop | Interval (distance-based) | Pitch (distance-based) | Pan 3D | Use Case |
 |----------|------|---------------------------|------------------------|--------|----------|
-| **Beacon** | No | Yes (faster when closer) | Yes (higher when closer) | Yes | Interactables (chests, shrines, pots) |
-| **Ambient** | Yes (PlaybackStopped event) | No | No | Yes | Portals, boombox, microwave |
+| **Beacon** | No | Yes (faster when closer) | Yes (higher when closer) | Yes | Chests, pots, NPCs |
+| **Ambient** | Yes (LoopStream) | No | No | Yes | Portals, Shrines |
 
-#### Current Sound Files (in `sounds/` folder)
+### Current Sound Configuration
 
-| File | Type | Behavior | Interval | Objects |
-|------|------|----------|----------|---------|
-| `chests.mp3` | chest | Beacon | 1.5s base | All chests (normal + gold) |
-| `shrines.mp3` | shrine | Beacon | 3.0s base | All shrines |
-| `portal.mp3` | portal | Ambient (loop) | - | All portals |
-| `boombox.mp3` | boombox | Ambient (loop) | - | Boombox NPC |
-| `microwave.mp3` | microwave | Ambient (loop) | - | Microwave NPC |
-| `beacon.wav` | default | Beacon | 2.5s base | Fallback for everything else |
+| File | soundType | Behavior | Objects |
+|------|-----------|----------|---------|
+| `chests.mp3` | chest | Beacon | All chests (normal + gold) |
+| `shrines.mp3` | shrine | Ambient (loop) | All shrines |
+| `portal.mp3` | portal | Ambient (loop) | Portals, BossSpawner |
+| `boombox.mp3` | boombox | Beacon | Boombox NPC |
+| `microwave.mp3` | microwave | Beacon | Microwave NPC |
+| `beacon.wav` | default | Beacon | Fallback for everything else |
 
-#### NAudio Ambient Loop Implementation
-Ambient sounds use `WaveOutEvent.PlaybackStopped` event to restart playback when finished:
+### NAudio Implementation
+
+#### LoopStream (Ambient Sounds)
+Custom `WaveStream` wrapper that loops audio infinitely:
 ```csharp
-waveOut.PlaybackStopped += (sender, args) => {
-    if (!ambientData.IsDisposed && ambientSounds.ContainsKey(targetId)) {
-        reader.Position = 0;
-        waveOut.Play();
+public class LoopStream : WaveStream
+{
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        int totalBytesRead = 0;
+        while (totalBytesRead < count)
+        {
+            int bytesRead = sourceStream.Read(buffer, offset + totalBytesRead, count - totalBytesRead);
+            if (bytesRead == 0)
+            {
+                sourceStream.Position = 0; // Loop back to start
+            }
+            else
+            {
+                totalBytesRead += bytesRead;
+            }
+        }
+        return totalBytesRead;
     }
-};
+}
 ```
 
-#### Pending Sound Files
+#### Pause/Resume System
+Ambient sounds are **paused** during menus (not destroyed), avoiding recreation issues:
+```csharp
+// When entering menu/pause state:
+naudioPlayer.PauseAllAmbientSounds();  // Just pauses playback
 
-**Interactables (Beacon behavior):**
-- `pot.wav` / `urn.wav` - Vasijas/urnas
-- `npc.wav` - NPCs (ShadyGuy, etc.)
+// When exiting menu/pause state:
+naudioPlayer.ResumeAllAmbientSounds();  // Resumes from where it left off
+```
 
-**Pickups (Beacon behavior):**
-- `pickup_health.wav` - Salud
-- `pickup_gold.wav` - Oro
-- `pickup_xp.wav` - Experiencia
-- `pickup_special.wav` - Powerups
+#### Distance-Based Effects (Beacon only)
+| Effect | Far | Close |
+|--------|-----|-------|
+| Volume | 10% | 100% |
+| Pitch | 0.6x (low) | 1.6x (high) |
+| Interval | 2.0x base (slow) | 0.15x base (fast) |
+| Pan | Full stereo separation based on angle |
 
-**Hazards (to implement):**
-- `hazard_water.wav` - Agua
-- `hazard_lava.wav` - Lava
+### Object Type Detection
 
-#### Object Categories Reference
+**Language-independent** - uses only GameObject names and component type names (always English in Unity):
+```csharp
+private string IdentifyType(string name)
+{
+    if (name.Contains("chest")) return "chest";
+    if (name.Contains("shrine") || name.Contains("pylon")) return "shrine";
+    if (name.Contains("bossspawner")) return "boss_portal";
+    if (name.Contains("portal")) return "portal";
+    if (name.Contains("pot") || name.Contains("urn")) return "urn";
+    // ... etc
+}
 
-See `objetos_para_sonidos.txt` for complete list of game objects.
+private string IdentifyTypeFromInteractable(BaseInteractable interactable, string objName)
+{
+    // First try by object name
+    string typeFromName = IdentifyType(objName);
+    if (typeFromName != "unknown") return typeFromName;
+
+    // Then by component type name (always English)
+    string typeName = interactable.GetType().Name.ToLower();
+    if (typeName.Contains("chest")) return "chest";
+    if (typeName.Contains("shrine")) return "shrine";
+    // ... etc - NO localized text checks
+}
+```
 
 ---
 
@@ -146,24 +182,18 @@ Uses **NAudio** library instead of Unity's AudioSource for better control over 3
 **NAudioBeaconPlayer features:**
 - Stereo panning based on object position relative to player/camera
 - Volume scaling based on distance (quadratic curve)
-- Pitch shifting based on distance (closer = higher pitch)
-- Pool of 12 concurrent sound players
-- Runs audio on separate thread to avoid blocking Unity
-
-**Distance-based effects (quadratic curves for dramatic changes):**
-| Effect | Far | Close |
-|--------|-----|-------|
-| Volume | 10% | 100% |
-| Pitch | 0.6x (low) | 1.6x (high) |
-| Interval | 2.0x base (slow) | 0.15x base (fast) |
-| Pan | Full stereo separation based on angle |
+- Pitch shifting based on distance (closer = higher pitch) - Beacon only
+- Pool of 12 concurrent sound players for beacon sounds
+- LoopStream for infinite ambient loops
+- Pause/Resume for menu transitions
 
 ##### Beacon Detection Features
 - Detection radius: 200 units
 - Scene change cleanup
 - 4-second delay after scene load (skip intro cinematic)
 - Beacons removed after interaction (BaseInteractable.Interact patch)
-- Beacons removed when `CanInteract()` returns false (catches used objects)
+- Beacons removed when `CanInteract()` returns false (catches used objects) - **except Ambient beacons**
+- Ambient beacons persist even if Target is destroyed (continue playing at last known position)
 - Sibling scanning: finds ALL interactables in same container (duplicates)
 - Proactive scanning: searches for objects by name patterns (Portal, Chest, Shrine, Pot, etc.)
 - Container scanning: searches common container objects for interactables
@@ -181,20 +211,25 @@ Detection methods in `IsMenuOpen()`:
 
 ##### Known Issues / TODO
 - [x] **Multi-sound system** - Implemented: chests, shrines, portals, boombox, microwave
+- [x] **Ambient loop system** - LoopStream for infinite loops, Pause/Resume for menus
 - [ ] **More sounds** - Add pot/urn, npc, pickup sounds
 - [ ] **Hazard detection** - Add Water, Lava, DamageZone, Boulder detection
 - [ ] **Beneficial zone detection** - Add HealingZone, Campfire detection
 
 ##### Fixed Bugs
-1. **Gold chests not detected proactively**: The issue was that chests were found by `GameObject.Find()` but beacons weren't created because they were outside the detection radius. Fixed by removing distance check for chest beacon creation - chests now get beacons immediately when found, and sound only plays when player enters range. Added `ScanAllChests()` method with `ProcessChestObject()` that creates beacons without distance verification.
-2. **UI reading previous item**: Added delayed speech system (`ScheduleDelayedAction`) - waits 150ms for UI to update before reading
-3. **Generic patches interrupting specialized**: Coordination system (`SpeakFromSpecializedPatch`, `ShouldSkipGenericPatch`) blocks generic patches for 0.5s after specialized patch speaks
-4. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch, not just animation
-5. **Beacons during pause menu**: Added specific pause menu object detection
-6. **Beacons during death**: Restored `DeathCamera` check + death button detection
-7. **Items reading requirements from other items**: Rewrote menu patches to use Transform-based search. For unlocked items, uses `GetTextsOutsideRequirements()` to skip texts inside requirement containers.
-8. **IL2CPP trampoline errors**: Direct property access on patched instances caused crashes. Fixed by using `__instance.transform` and recursive `FindChildByName()` search.
-9. **Garbage text mixed with valid text**: Text like "Kill 1000 skeletons fsd fsdfesf efsdfes efs" was being fully discarded. Fixed with `RemoveGarbageFromText()` that strips only the garbage portion while preserving valid text.
+1. **Gold chests not detected proactively**: Fixed by removing distance check for chest beacon creation.
+2. **UI reading previous item**: Added delayed speech system (`ScheduleDelayedAction`) - waits 150ms for UI to update.
+3. **Generic patches interrupting specialized**: Coordination system blocks generic patches for 0.5s after specialized patch speaks.
+4. **Beacons during chest window**: Track `IsChestWindowOpen` via `OnClose()` patch.
+5. **Beacons during pause menu**: Added specific pause menu object detection.
+6. **Beacons during death**: Restored `DeathCamera` check + death button detection.
+7. **Items reading requirements from other items**: Transform-based search with `GetTextsOutsideRequirements()`.
+8. **IL2CPP trampoline errors**: Use `__instance.transform` and recursive `FindChildByName()` search.
+9. **Garbage text mixed with valid text**: `RemoveGarbageFromText()` strips only garbage portion.
+10. **Multiple ambient sounds accumulating**: Changed from PlaybackStopped event to LoopStream for reliable looping.
+11. **Ambient sounds recreating during menu flicker**: Changed from Stop/Recreate to Pause/Resume.
+12. **Ambient beacons removed when target destroyed**: Skip removal for Ambient behavior beacons.
+13. **Localized text breaking detection**: Removed all localized text checks, use only object/component names.
 
 ---
 
@@ -255,27 +290,6 @@ private static string FindTextByObjectName(Transform root, string objectName)
 }
 ```
 
-### Excluding Requirement Texts Pattern
-To read item info without mixing in requirements from other items:
-```csharp
-private static void CollectTextsOutsideRequirements(Transform parent, List<string> list, bool insideReq)
-{
-    string objName = parent.name.ToLower();
-    bool isReqContainer = objName.Contains("requirement") || objName.Contains("reqcontainer") ||
-                          objName.Contains("reqprefab") || objName.StartsWith("req");
-    if (isReqContainer) insideReq = true;
-
-    if (!insideReq)
-    {
-        var tmp = parent.GetComponent<TextMeshProUGUI>();
-        if (tmp != null) list.Add(SanitizeText(tmp.text));
-    }
-
-    for (int i = 0; i < parent.childCount; i++)
-        CollectTextsOutsideRequirements(parent.GetChild(i), list, insideReq);
-}
-```
-
 ### Object Naming Patterns
 Unity clone naming conventions to search:
 - `ObjectName`
@@ -315,24 +329,7 @@ if (Regex.IsMatch(text, @"^([a-z]{1,2}\s+){5,}$", RegexOptions.IgnoreCase)) retu
 
 **Removal** - `RemoveGarbageFromText()` strips garbage from mixed text:
 ```csharp
-// Removes 2+ consecutive words made only of f, s, d, e letters
 text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.IgnoreCase);
-// Example: "Kill 1000 skeletons fsd fsdfesf efsdfes efs. 100 / 10 000"
-//       -> "Kill 1000 skeletons. 100 / 10 000"
-```
-
-### Progress Text Filtering
-The game shows progress like "100 / 10 000" or pure numbers like "5,000". Filter with:
-```csharp
-private static bool IsProgressText(string text)
-{
-    if (string.IsNullOrEmpty(text)) return false;
-    // Progress: number / number (e.g., "100 / 10 000", "363 / 1.000")
-    if (Regex.IsMatch(text, @"^\s*[\d.,\s]+\s*/\s*[\d.,\s]+\s*$")) return true;
-    // Pure numbers: "5,000", "10.000", "100"
-    if (Regex.IsMatch(text, @"^\s*[\d.,\s]+\s*$")) return true;
-    return false;
-}
 ```
 
 ---
@@ -352,7 +349,7 @@ private static bool IsProgressText(string text)
 
 ### Components
 - `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
-- `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch
+- `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search
@@ -385,4 +382,4 @@ Auto-copies to: `D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\`
 - NAudio requires .NET 6.0 runtime (included with BepInEx IL2CPP)
 - Test with BepInEx console or LogOutput.log for debugging
 - Decompiled game code in `megabonk code/` folder for reference
-- Beacon sound file should be mono or stereo WAV (converted to mono internally for panning)
+- Object detection is language-independent (uses object/component names, not localized text)

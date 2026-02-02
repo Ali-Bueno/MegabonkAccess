@@ -9,6 +9,59 @@ using UnityEngine;
 namespace MegabonkAccess.Components
 {
     /// <summary>
+    /// WaveStream que hace loop infinito de un audio.
+    /// </summary>
+    public class LoopStream : WaveStream
+    {
+        private readonly WaveStream sourceStream;
+
+        public LoopStream(WaveStream sourceStream)
+        {
+            this.sourceStream = sourceStream;
+        }
+
+        public override WaveFormat WaveFormat => sourceStream.WaveFormat;
+
+        public override long Length => sourceStream.Length;
+
+        public override long Position
+        {
+            get => sourceStream.Position;
+            set => sourceStream.Position = value;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int totalBytesRead = 0;
+
+            while (totalBytesRead < count)
+            {
+                int bytesRead = sourceStream.Read(buffer, offset + totalBytesRead, count - totalBytesRead);
+                if (bytesRead == 0)
+                {
+                    // Llegamos al final, volver al principio
+                    sourceStream.Position = 0;
+                }
+                else
+                {
+                    totalBytesRead += bytesRead;
+                }
+            }
+
+            return totalBytesRead;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                sourceStream?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
     /// Tipos de comportamiento de audio
     /// </summary>
     public enum AudioBehavior
@@ -72,7 +125,7 @@ namespace MegabonkAccess.Components
     public class AmbientSoundData : IDisposable
     {
         public WaveOutEvent OutputDevice;
-        public AudioFileReader Reader;
+        public LoopStream LoopStream;  // LoopStream dispone el reader internamente
         public VolumeSampleProvider VolumeProvider;
         public PanningSampleProvider PanProvider;
         public string SoundType;
@@ -86,7 +139,7 @@ namespace MegabonkAccess.Components
             {
                 OutputDevice?.Stop();
                 OutputDevice?.Dispose();
-                Reader?.Dispose();
+                LoopStream?.Dispose();  // Esto también dispone el AudioFileReader interno
             }
             catch { }
         }
@@ -160,7 +213,7 @@ namespace MegabonkAccess.Components
                 // Cofres (beacon)
                 { "chest", new[] { "chests.mp3", "chests.wav", "chest.mp3", "chest.wav" } },
 
-                // NPCs especiales
+                // NPCs especiales (beacon)
                 { "boombox", new[] { "boombox.mp3", "boombox.wav" } },
                 { "microwave", new[] { "microwave.mp3", "microwave.wav" } },
 
@@ -203,14 +256,14 @@ namespace MegabonkAccess.Components
 
         /// <summary>
         /// Determina el comportamiento de audio para un tipo
+        /// Solo boss_portal (soundType "portal") usa loop ambient
         /// </summary>
         public static AudioBehavior GetBehavior(string type)
         {
             switch (type)
             {
                 case "portal":
-                case "boombox":
-                case "microwave":
+                case "shrine":
                     return AudioBehavior.Ambient;
                 default:
                     return AudioBehavior.Beacon;
@@ -274,7 +327,8 @@ namespace MegabonkAccess.Components
                 // Si está fuera de rango, detener el sonido
                 if (distance > maxDistance)
                 {
-                    StopAmbientSound(targetId);
+                    Plugin.Log.LogDebug($"[NAudioBeacon] Distance {distance:F0} > max {maxDistance:F0}, stopping ambient {targetId}");
+                    StopAmbientSound(targetId, "distance_check");
                     return;
                 }
 
@@ -293,20 +347,29 @@ namespace MegabonkAccess.Components
                 {
                     if (ambientSounds.TryGetValue(targetId, out var ambient))
                     {
-                        // Actualizar volumen y pan del sonido existente (loop continuo)
-                        if (ambient.VolumeProvider != null)
-                            ambient.VolumeProvider.Volume = finalVolume;
-                        if (ambient.PanProvider != null)
-                            ambient.PanProvider.Pan = pan;
+                        // Verificar que el sonido no fue disposed
+                        if (ambient.IsDisposed)
+                        {
+                            // Fue disposed, remover y crear uno nuevo
+                            ambientSounds.Remove(targetId);
+                            Plugin.Log.LogDebug($"[NAudioBeacon] Removing disposed ambient for {targetId}");
+                        }
+                        else
+                        {
+                            // Actualizar volumen y pan del sonido existente (loop continuo)
+                            if (ambient.VolumeProvider != null)
+                                ambient.VolumeProvider.Volume = finalVolume;
+                            if (ambient.PanProvider != null)
+                                ambient.PanProvider.Pan = pan;
+                            return; // Ya existe y está funcionando
+                        }
                     }
-                    else
-                    {
-                        // Crear nuevo sonido ambient
-                        string soundFile = GetSoundFile(soundType);
-                        if (soundFile == null) return;
 
-                        ThreadPool.QueueUserWorkItem(_ => CreateAmbientSound(targetId, soundFile, soundType, finalVolume, pan));
-                    }
+                    // Crear nuevo sonido ambient (síncrono para evitar duplicados)
+                    string soundFile = GetSoundFile(soundType);
+                    if (soundFile == null) return;
+
+                    CreateAmbientSound(targetId, soundFile, soundType, finalVolume, pan);
                 }
             }
             catch (Exception e)
@@ -318,7 +381,7 @@ namespace MegabonkAccess.Components
         /// <summary>
         /// Detiene un sonido ambient
         /// </summary>
-        public void StopAmbientSound(int targetId)
+        public void StopAmbientSound(int targetId, string source = "unknown")
         {
             lock (ambientLock)
             {
@@ -326,7 +389,7 @@ namespace MegabonkAccess.Components
                 {
                     ambient.Dispose();
                     ambientSounds.Remove(targetId);
-                    Plugin.Log.LogDebug($"[NAudioBeacon] Stopped ambient sound for {targetId}");
+                    Plugin.Log.LogInfo($"[NAudioBeacon] STOP ambient {targetId} - source: {source}");
                 }
             }
         }
@@ -338,12 +401,57 @@ namespace MegabonkAccess.Components
         {
             lock (ambientLock)
             {
+                int count = ambientSounds.Count;
+                if (count == 0) return;
+
                 foreach (var ambient in ambientSounds.Values)
                 {
                     ambient.Dispose();
                 }
                 ambientSounds.Clear();
-                Plugin.Log.LogInfo("[NAudioBeacon] Stopped all ambient sounds");
+                Plugin.Log.LogInfo($"[NAudioBeacon] Stopped all ambient sounds (was {count} sounds)");
+            }
+        }
+
+        /// <summary>
+        /// Pausa todos los sonidos ambient sin destruirlos
+        /// </summary>
+        public void PauseAllAmbientSounds()
+        {
+            lock (ambientLock)
+            {
+                foreach (var ambient in ambientSounds.Values)
+                {
+                    try
+                    {
+                        if (!ambient.IsDisposed && ambient.OutputDevice != null)
+                        {
+                            ambient.OutputDevice.Pause();
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reanuda todos los sonidos ambient pausados
+        /// </summary>
+        public void ResumeAllAmbientSounds()
+        {
+            lock (ambientLock)
+            {
+                foreach (var ambient in ambientSounds.Values)
+                {
+                    try
+                    {
+                        if (!ambient.IsDisposed && ambient.OutputDevice != null)
+                        {
+                            ambient.OutputDevice.Play();
+                        }
+                    }
+                    catch { }
+                }
             }
         }
 
@@ -427,15 +535,26 @@ namespace MegabonkAccess.Components
                 try
                 {
                     // Verificar que no existe ya
-                    if (ambientSounds.ContainsKey(targetId)) return;
+                    if (ambientSounds.ContainsKey(targetId))
+                    {
+                        Plugin.Log.LogDebug($"[NAudioBeacon] Ambient sound already exists for {targetId}, skipping creation");
+                        return;
+                    }
 
+                    Plugin.Log.LogInfo($"[NAudioBeacon] Creating NEW ambient sound: {soundType} for targetId={targetId}");
+
+                    // Crear reader y envolverlo en LoopStream para loop infinito
                     var reader = new AudioFileReader(soundFile);
+                    var loopStream = new LoopStream(reader);
+
+                    // Convertir a sample provider
+                    var sampleProvider = loopStream.ToSampleProvider();
 
                     // Convertir a mono si es stereo
-                    ISampleProvider monoProvider = reader;
-                    if (reader.WaveFormat.Channels == 2)
+                    ISampleProvider monoProvider = sampleProvider;
+                    if (loopStream.WaveFormat.Channels == 2)
                     {
-                        monoProvider = new StereoToMonoSampleProvider(reader);
+                        monoProvider = new StereoToMonoSampleProvider(sampleProvider);
                     }
 
                     var panProvider = new PanningSampleProvider(monoProvider)
@@ -451,11 +570,11 @@ namespace MegabonkAccess.Components
                     var waveOut = new WaveOutEvent();
                     waveOut.Init(volumeProvider);
 
-                    // Crear el data object primero
+                    // Crear el data object
                     var ambientData = new AmbientSoundData
                     {
                         OutputDevice = waveOut,
-                        Reader = reader,
+                        LoopStream = loopStream,  // Almacenar el LoopStream para dispose
                         VolumeProvider = volumeProvider,
                         PanProvider = panProvider,
                         SoundType = soundType,
@@ -463,27 +582,11 @@ namespace MegabonkAccess.Components
                         IsDisposed = false
                     };
 
-                    // Loop: cuando termina, reiniciar (solo si no fue disposed)
-                    waveOut.PlaybackStopped += (sender, args) =>
-                    {
-                        try
-                        {
-                            if (ambientData.IsDisposed) return;
-                            lock (ambientLock)
-                            {
-                                if (!ambientData.IsDisposed && ambientSounds.ContainsKey(targetId))
-                                {
-                                    reader.Position = 0;
-                                    waveOut.Play();
-                                }
-                            }
-                        }
-                        catch { }
-                    };
+                    // LoopStream hace el loop automáticamente, no necesitamos PlaybackStopped
 
                     waveOut.Play();
                     ambientSounds[targetId] = ambientData;
-                    Plugin.Log.LogInfo($"[NAudioBeacon] Created ambient sound: {soundType} for {targetId}");
+                    Plugin.Log.LogInfo($"[NAudioBeacon] SUCCESS: Ambient sound {soundType} now playing with LOOP for targetId={targetId} (total: {ambientSounds.Count})");
                 }
                 catch (Exception e)
                 {

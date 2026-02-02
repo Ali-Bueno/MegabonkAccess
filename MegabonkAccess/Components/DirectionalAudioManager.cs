@@ -47,39 +47,43 @@ namespace MegabonkAccess.Components
         private GameObject cachedDeathCamera = null;
         private float nextDeathCameraSearchTime = 0f;
 
+        // State tracking for ambient sound pausing (to only call StopAllAmbientSounds once)
+        private bool wasAmbientPaused = false;
+
         // Configuraciones por tipo (pitch, intervalo en segundos, volumen, soundType para archivo)
         // soundType mapea al archivo de sonido en NAudioBeaconPlayer
         private static readonly Dictionary<string, (float pitch, float interval, float volume, string soundType)> typeConfigs =
             new Dictionary<string, (float, float, float, string)>
         {
             // Cofres - beacon behavior (chests.mp3)
-            { "chest", (1.0f, 1.5f, 0.7f, "chest") },
+            { "chest", (1.0f, 1.5f, 0.8f, "chest") },
 
-            // Shrines - beacon behavior (shrines.mp3)
-            { "shrine", (0.75f, 3.0f, 0.7f, "shrine") },
+            // Shrines - ambient loop (shrines.mp3)
+            { "shrine", (1.0f, 0f, 0.8f, "shrine") },
 
-            // Portales - ambient loop (portal.mp3)
-            { "portal", (1.0f, 0f, 0.8f, "portal") },
+            // Portales de jefe - ambient loop (portal.mp3) - intervalo no se usa
+            { "boss_portal", (1.0f, 0f, 0.8f, "portal") },
 
-            // NPCs especiales con sonido propio
-            { "boombox", (1.0f, 0f, 0.7f, "boombox") },
-            { "microwave", (1.0f, 0f, 0.7f, "microwave") },
+            // NPCs especiales - beacon behavior (no loop)
+            { "boombox", (1.0f, 2.5f, 0.8f, "boombox") },
+            { "microwave", (1.0f, 2.5f, 0.8f, "microwave") },
 
-            // Resto usa beacon.wav como fallback
-            { "health", (1.2f, 2.0f, 0.6f, "default") },
-            { "gold", (1.6f, 1.5f, 0.4f, "default") },
-            { "urn", (0.9f, 1.5f, 0.6f, "default") },
-            { "music", (0.6f, 4.0f, 0.7f, "default") },
-            { "npc", (0.8f, 3.0f, 0.6f, "default") },
+            // Resto usa beacon.wav como fallback - volumen aumentado
+            { "health", (1.2f, 1.5f, 0.8f, "default") },
+            { "gold", (1.6f, 1.0f, 0.7f, "default") },
+            { "urn", (0.9f, 1.2f, 0.8f, "default") },
+            { "music", (0.6f, 3.0f, 0.8f, "default") },
+            { "npc", (0.8f, 2.0f, 0.8f, "default") },
+            { "portal", (1.0f, 0f, 0.8f, "portal") },  // Portales normales usan portal.mp3 con loop
 
-            // Pickups
-            { "pickup_xp", (1.8f, 1.0f, 0.3f, "default") },
-            { "pickup_gold", (1.6f, 1.0f, 0.35f, "default") },
-            { "pickup_health", (1.0f, 1.5f, 0.5f, "default") },
-            { "pickup_silver", (1.4f, 1.2f, 0.4f, "default") },
-            { "pickup_special", (0.8f, 2.0f, 0.6f, "default") },
+            // Pickups - volumen aumentado
+            { "pickup_xp", (1.8f, 0.8f, 0.5f, "default") },
+            { "pickup_gold", (1.6f, 0.8f, 0.6f, "default") },
+            { "pickup_health", (1.0f, 1.2f, 0.7f, "default") },
+            { "pickup_silver", (1.4f, 1.0f, 0.6f, "default") },
+            { "pickup_special", (0.8f, 1.5f, 0.8f, "default") },
 
-            { "default", (1.0f, 2.5f, 0.5f, "default") }
+            { "default", (1.0f, 2.0f, 0.8f, "default") }
         };
 
         private class AudioBeaconData
@@ -217,6 +221,7 @@ namespace MegabonkAccess.Components
             activeBeacons.Clear();
             activePositions.Clear();
             interactedObjects.Clear();  // Reset interacted objects on scene change
+            wasAmbientPaused = false;  // Reset pause state for new scene
             Plugin.Log.LogInfo("[DirectionalAudio] All beacons cleared");
         }
 
@@ -1095,6 +1100,9 @@ namespace MegabonkAccess.Components
             if (name.Contains("chest")) return "chest";
             // Shrines including charge shrines and pylons
             if (name.Contains("shrine") || name.Contains("moai") || name.Contains("charge") || name.Contains("pylon")) return "shrine";
+            // Boss spawner - usa portal.mp3 con loop
+            if (name.Contains("bossspawner") || name.Contains("boss spawner")) return "boss_portal";
+            // Solo portales reales (no salidas, no puertas)
             if (name.Contains("portal")) return "portal";
             if (name.Contains("borgor") || name.Contains("health") || name.Contains("gift")) return "health";
             if (name.Contains("gold") || name.Contains("coin")) return "gold";
@@ -1104,8 +1112,6 @@ namespace MegabonkAccess.Components
             if (name.Contains("microwave")) return "microwave";
             if (name.Contains("music") || name.Contains("jukebox")) return "music";
             if (name.Contains("npc") || name.Contains("merchant") || name.Contains("shop") || name.Contains("vendor") || name.Contains("shady") || name.Contains("character")) return "npc";
-            // Boss spawner and special portals
-            if (name.Contains("boss") || name.Contains("spawner") || name.Contains("ghost")) return "portal";
             // Crypt/Tomb/Coffin - use shrine sound (mysterious)
             if (name.Contains("crypt") || name.Contains("coffin") || name.Contains("tomb") || name.Contains("grave") || name.Contains("statue") || name.Contains("skeleton")) return "shrine";
             // Cages - use default
@@ -1118,92 +1124,22 @@ namespace MegabonkAccess.Components
 
         private string IdentifyTypeFromInteractable(BaseInteractable interactable, string objName)
         {
-            // Primero intentar por nombre del objeto (más confiable)
+            // Primero intentar por nombre del objeto (más confiable, independiente de idioma)
             string typeFromName = IdentifyType(objName);
             if (typeFromName != "unknown") return typeFromName;
 
-            // También verificar el nombre del tipo de componente
+            // Verificar el nombre del tipo de componente (siempre en inglés en Unity)
             string typeName = interactable.GetType().Name.ToLower();
             if (typeName.Contains("chest")) return "chest";
-            if (typeName.Contains("shrine")) return "shrine";
+            if (typeName.Contains("shrine") || typeName.Contains("charge")) return "shrine";
             if (typeName.Contains("portal")) return "portal";
-            if (typeName.Contains("pot")) return "urn";
-            if (typeName.Contains("npc") || typeName.Contains("merchant") || typeName.Contains("shady")) return "npc";
+            if (typeName.Contains("bossspawner")) return "boss_portal";
+            if (typeName.Contains("pot") || typeName.Contains("breakable")) return "urn";
+            if (typeName.Contains("npc") || typeName.Contains("merchant") || typeName.Contains("shady") || typeName.Contains("microwave") || typeName.Contains("boombox")) return "npc";
+            if (typeName.Contains("gift") || typeName.Contains("health")) return "health";
+            if (typeName.Contains("pickup")) return "pickup_xp";
 
-            // Si no encontramos por nombre, intentar obtener el texto de interacción
-            // Wrapped in try-catch because GetInteractString() can throw errors
-            // (e.g., when player stats aren't available in menu)
-            string interactText = null;
-            try
-            {
-                interactText = interactable.GetInteractString();
-            }
-            catch
-            {
-                // GetInteractString failed, use default type
-                return "default";
-            }
-
-            if (!string.IsNullOrEmpty(interactText))
-            {
-                string lowerText = interactText.ToLower();
-
-                // Español e inglés para cofres/chests
-                if (lowerText.Contains("chest") || lowerText.Contains("cofre") ||
-                    lowerText.Contains("baúl") || lowerText.Contains("baul") ||
-                    lowerText.Contains("open") || lowerText.Contains("abrir") ||
-                    lowerText.Contains("oro") || lowerText.Contains("gold"))
-                    return "chest";
-
-                // Español e inglés para santuarios
-                if (lowerText.Contains("shrine") || lowerText.Contains("santuario") ||
-                    lowerText.Contains("altar") || lowerText.Contains("pray") ||
-                    lowerText.Contains("rezar") || lowerText.Contains("orar"))
-                    return "shrine";
-
-                // Español e inglés para portales
-                if (lowerText.Contains("portal") || lowerText.Contains("door") ||
-                    lowerText.Contains("puerta") || lowerText.Contains("enter") ||
-                    lowerText.Contains("entrar") || lowerText.Contains("exit") ||
-                    lowerText.Contains("salir") || lowerText.Contains("next"))
-                    return "portal";
-
-                // Español e inglés para vasijas/urnas (objetos rompibles)
-                if (lowerText.Contains("urn") || lowerText.Contains("urna") ||
-                    lowerText.Contains("vase") || lowerText.Contains("vasija") ||
-                    lowerText.Contains("jar") || lowerText.Contains("jarra") ||
-                    lowerText.Contains("break") || lowerText.Contains("rompe") ||
-                    lowerText.Contains("destroy") || lowerText.Contains("destruir") ||
-                    lowerText.Contains("pot") || lowerText.Contains("olla"))
-                    return "urn";
-
-                // Español e inglés para comida/salud
-                if (lowerText.Contains("health") || lowerText.Contains("salud") ||
-                    lowerText.Contains("heal") || lowerText.Contains("curar") ||
-                    lowerText.Contains("food") || lowerText.Contains("comida") ||
-                    lowerText.Contains("borgor") || lowerText.Contains("burger") ||
-                    lowerText.Contains("hamburguesa"))
-                    return "health";
-
-                // NPCs/merchants
-                if (lowerText.Contains("npc") || lowerText.Contains("merchant") ||
-                    lowerText.Contains("shop") || lowerText.Contains("tienda") ||
-                    lowerText.Contains("vendor") || lowerText.Contains("vendedor") ||
-                    lowerText.Contains("talk") || lowerText.Contains("hablar") ||
-                    lowerText.Contains("buy") || lowerText.Contains("comprar"))
-                    return "npc";
-
-                // Música
-                if (lowerText.Contains("music") || lowerText.Contains("música") ||
-                    lowerText.Contains("musica") || lowerText.Contains("jukebox") ||
-                    lowerText.Contains("play") || lowerText.Contains("listen") ||
-                    lowerText.Contains("escuchar"))
-                    return "music";
-
-                Plugin.Log.LogDebug($"[DirectionalAudio] Unknown interactable: {objName} -> {interactText}");
-            }
-
-            // Si hay cualquier interactuable, darle sonido default
+            // Si no se pudo identificar, usar default (no depender de texto localizado)
             return "default";
         }
 
@@ -1242,7 +1178,10 @@ namespace MegabonkAccess.Components
 
                 activeBeacons[id] = beacon;
                 activePositions.Add(posKey);
-                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon for {type} ({config.soundType}, {behavior}) at {pos}");
+
+                // Log detallado para debug de comportamiento
+                string behaviorStr = behavior == AudioBehavior.Ambient ? "AMBIENT/LOOP" : "BEACON/ONE-SHOT";
+                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon: type={type}, soundType={config.soundType}, behavior={behaviorStr}, pos={pos}");
             }
             catch (Exception e)
             {
@@ -1334,19 +1273,26 @@ namespace MegabonkAccess.Components
             if (playerTransform == null || !audioReady || naudioPlayer == null) return;
 
             // Wait for scene start delay (cinematic/intro)
-            if (Time.time - sceneLoadTime < sceneStartDelay)
+            bool shouldPauseAmbient = Time.time - sceneLoadTime < sceneStartDelay || IsMenuOpen();
+
+            if (shouldPauseAmbient)
             {
-                // Detener todos los ambient sounds durante el delay
-                naudioPlayer.StopAllAmbientSounds();
+                // Pausar sonidos ambient (no destruirlos)
+                if (!wasAmbientPaused)
+                {
+                    naudioPlayer.PauseAllAmbientSounds();
+                    wasAmbientPaused = true;
+                    Plugin.Log.LogDebug("[DirectionalAudio] Paused ambient sounds (menu/delay)");
+                }
                 return;
             }
 
-            // No reproducir sonidos si hay un menú abierto
-            if (IsMenuOpen())
+            // Si estábamos pausados y ahora no, reanudar sonidos
+            if (wasAmbientPaused)
             {
-                // Detener todos los ambient sounds cuando hay menú abierto
-                naudioPlayer.StopAllAmbientSounds();
-                return;
+                naudioPlayer.ResumeAllAmbientSounds();
+                wasAmbientPaused = false;
+                Plugin.Log.LogDebug("[DirectionalAudio] Resumed ambient sounds");
             }
 
             Vector3 playerPos = playerTransform.position;
@@ -1379,8 +1325,11 @@ namespace MegabonkAccess.Components
                     // Calcular distancia
                     float distance = Vector3.Distance(playerPos, beaconPos);
 
+                    // Forzar Ambient para soundType "portal" (por si el Behavior no se configuró bien)
+                    bool useAmbient = beacon.Behavior == AudioBehavior.Ambient || beacon.SoundType == "portal";
+
                     // Manejar según el comportamiento
-                    if (beacon.Behavior == AudioBehavior.Ambient)
+                    if (useAmbient)
                     {
                         // Ambient: loop continuo, actualizar volumen/pan basado en distancia
                         if (distance <= detectionRadius)
@@ -1398,7 +1347,7 @@ namespace MegabonkAccess.Components
                         else
                         {
                             // Fuera de rango, detener
-                            naudioPlayer.StopAmbientSound(kvp.Key);
+                            naudioPlayer.StopAmbientSound(kvp.Key, "out_of_range");
                         }
                     }
                     else
@@ -1453,6 +1402,14 @@ namespace MegabonkAccess.Components
                     {
                         if (beacon.Target == null || !beacon.Target.activeInHierarchy)
                         {
+                            // Para beacons Ambient (portales), NO eliminar aunque el objeto se destruya
+                            // Seguirá sonando en la última posición conocida
+                            if (beacon.Behavior == AudioBehavior.Ambient)
+                            {
+                                // Mantener el beacon ambient, solo actualizar que el target ya no existe
+                                continue;
+                            }
+
                             // Target fue destruido o desactivado, eliminar beacon
                             if (!string.IsNullOrEmpty(beacon.PosKey))
                             {
@@ -1464,7 +1421,9 @@ namespace MegabonkAccess.Components
                         }
 
                         // Verificar si el interactable ya no puede ser interactuado (fue usado)
-                        if (!beacon.Type.StartsWith("pickup_"))
+                        // SKIP para beacons Ambient (portales) - pueden tener CanInteract=false pero aún deben sonar
+                        // SKIP para pickups - se manejan diferente
+                        if (!beacon.Type.StartsWith("pickup_") && beacon.Behavior != AudioBehavior.Ambient)
                         {
                             var interactable = beacon.Target.GetComponent<BaseInteractable>();
                             if (interactable != null)
@@ -1512,7 +1471,7 @@ namespace MegabonkAccess.Components
                         // Detener ambient sound si es de tipo Ambient
                         if (beacon?.Behavior == AudioBehavior.Ambient && naudioPlayer != null)
                         {
-                            naudioPlayer.StopAmbientSound(id);
+                            naudioPlayer.StopAmbientSound(id, "cleanup_beacons");
                         }
 
                         if (!string.IsNullOrEmpty(beacon?.PosKey))
@@ -1601,7 +1560,7 @@ namespace MegabonkAccess.Components
                     // Detener ambient sound si es de tipo Ambient
                     if (beacon?.Behavior == AudioBehavior.Ambient && naudioPlayer != null)
                     {
-                        naudioPlayer.StopAmbientSound(id);
+                        naudioPlayer.StopAmbientSound(id, "interacted");
                     }
 
                     if (!string.IsNullOrEmpty(beacon?.PosKey))
