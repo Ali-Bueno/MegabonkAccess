@@ -47,27 +47,39 @@ namespace MegabonkAccess.Components
         private GameObject cachedDeathCamera = null;
         private float nextDeathCameraSearchTime = 0f;
 
-        // Configuraciones por tipo (pitch, intervalo en segundos, volumen)
-        // Intervalos aumentados para ser menos molestos
-        private static readonly Dictionary<string, (float pitch, float interval, float volume)> typeConfigs =
-            new Dictionary<string, (float, float, float)>
+        // Configuraciones por tipo (pitch, intervalo en segundos, volumen, soundType para archivo)
+        // soundType mapea al archivo de sonido en NAudioBeaconPlayer
+        private static readonly Dictionary<string, (float pitch, float interval, float volume, string soundType)> typeConfigs =
+            new Dictionary<string, (float, float, float, string)>
         {
-            // Interactuables
-            { "chest", (1.0f, 3.0f, 0.7f) },      // Cofres: cada 3 segundos
-            { "shrine", (0.75f, 3.0f, 0.7f) },    // Santuarios: cada 3 segundos
-            { "portal", (1.4f, 2.0f, 0.8f) },     // Portales: cada 2 segundos
-            { "health", (1.2f, 2.0f, 0.6f) },     // Hamburguesas interactuables
-            { "gold", (1.6f, 1.5f, 0.4f) },       // Oro interactuable
-            { "urn", (0.9f, 1.5f, 0.6f) },        // Urnas/vasijas rompibles
-            { "music", (0.6f, 4.0f, 0.7f) },      // Música: cada 4 segundos
-            { "npc", (0.8f, 3.0f, 0.6f) },        // NPCs: cada 3 segundos
-            // Pickups (items sueltos en el suelo)
-            { "pickup_xp", (1.8f, 1.0f, 0.3f) },       // XP orbs: pitch alto, rápido, bajo volumen
-            { "pickup_gold", (1.6f, 1.0f, 0.35f) },    // Gold drops: similar a XP
-            { "pickup_health", (1.0f, 1.5f, 0.5f) },   // Health pickups: más audible
-            { "pickup_silver", (1.4f, 1.2f, 0.4f) },   // Silver coins
-            { "pickup_special", (0.8f, 2.0f, 0.6f) },  // Special powerups (nuke, shield, etc.)
-            { "default", (1.0f, 2.5f, 0.5f) }          // Default: cada 2.5 segundos
+            // Cofres - beacon behavior (chests.mp3)
+            { "chest", (1.0f, 1.5f, 0.7f, "chest") },
+
+            // Shrines - beacon behavior (shrines.mp3)
+            { "shrine", (0.75f, 3.0f, 0.7f, "shrine") },
+
+            // Portales - ambient loop (portal.mp3)
+            { "portal", (1.0f, 0f, 0.8f, "portal") },
+
+            // NPCs especiales con sonido propio
+            { "boombox", (1.0f, 0f, 0.7f, "boombox") },
+            { "microwave", (1.0f, 0f, 0.7f, "microwave") },
+
+            // Resto usa beacon.wav como fallback
+            { "health", (1.2f, 2.0f, 0.6f, "default") },
+            { "gold", (1.6f, 1.5f, 0.4f, "default") },
+            { "urn", (0.9f, 1.5f, 0.6f, "default") },
+            { "music", (0.6f, 4.0f, 0.7f, "default") },
+            { "npc", (0.8f, 3.0f, 0.6f, "default") },
+
+            // Pickups
+            { "pickup_xp", (1.8f, 1.0f, 0.3f, "default") },
+            { "pickup_gold", (1.6f, 1.0f, 0.35f, "default") },
+            { "pickup_health", (1.0f, 1.5f, 0.5f, "default") },
+            { "pickup_silver", (1.4f, 1.2f, 0.4f, "default") },
+            { "pickup_special", (0.8f, 2.0f, 0.6f, "default") },
+
+            { "default", (1.0f, 2.5f, 0.5f, "default") }
         };
 
         private class AudioBeaconData
@@ -80,6 +92,8 @@ namespace MegabonkAccess.Components
             public float Interval;
             public float Volume;
             public string PosKey;  // For cleanup tracking
+            public string SoundType;  // Archivo de sonido a usar
+            public AudioBehavior Behavior;  // Beacon o Ambient
         }
 
         static DirectionalAudioManager()
@@ -194,6 +208,12 @@ namespace MegabonkAccess.Components
 
         private void ClearAllBeacons()
         {
+            // Detener todos los ambient sounds
+            if (naudioPlayer != null)
+            {
+                naudioPlayer.StopAllAmbientSounds();
+            }
+
             activeBeacons.Clear();
             activePositions.Clear();
             interactedObjects.Clear();  // Reset interacted objects on scene change
@@ -1080,7 +1100,9 @@ namespace MegabonkAccess.Components
             if (name.Contains("gold") || name.Contains("coin")) return "gold";
             // Vasijas/Pots
             if (name.Contains("pot") || name.Contains("urn") || name.Contains("vase") || name.Contains("jar") || name.Contains("breakable")) return "urn";
-            if (name.Contains("music") || name.Contains("jukebox") || name.Contains("boombox") || name.Contains("microwave")) return "music";
+            if (name.Contains("boombox")) return "boombox";
+            if (name.Contains("microwave")) return "microwave";
+            if (name.Contains("music") || name.Contains("jukebox")) return "music";
             if (name.Contains("npc") || name.Contains("merchant") || name.Contains("shop") || name.Contains("vendor") || name.Contains("shady") || name.Contains("character")) return "npc";
             // Boss spawner and special portals
             if (name.Contains("boss") || name.Contains("spawner") || name.Contains("ghost")) return "portal";
@@ -1200,6 +1222,9 @@ namespace MegabonkAccess.Components
                 // Obtener configuración para este tipo
                 var config = typeConfigs.ContainsKey(type) ? typeConfigs[type] : typeConfigs["default"];
 
+                // Determinar comportamiento de audio
+                var behavior = NAudioBeaconPlayer.GetBehavior(config.soundType);
+
                 // Crear beacon sin AudioSource de Unity - NAudio maneja el audio
                 var beacon = new AudioBeaconData
                 {
@@ -1209,13 +1234,15 @@ namespace MegabonkAccess.Components
                     Pitch = config.pitch,
                     Interval = config.interval,
                     Volume = config.volume,
-                    NextPlayTime = Time.time + UnityEngine.Random.Range(0f, config.interval),
-                    PosKey = posKey
+                    NextPlayTime = Time.time + UnityEngine.Random.Range(0f, Math.Max(0.1f, config.interval)),
+                    PosKey = posKey,
+                    SoundType = config.soundType,
+                    Behavior = behavior
                 };
 
                 activeBeacons[id] = beacon;
                 activePositions.Add(posKey);
-                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon for {type} at {pos}");
+                Plugin.Log.LogInfo($"[DirectionalAudio] Created beacon for {type} ({config.soundType}, {behavior}) at {pos}");
             }
             catch (Exception e)
             {
@@ -1309,12 +1336,16 @@ namespace MegabonkAccess.Components
             // Wait for scene start delay (cinematic/intro)
             if (Time.time - sceneLoadTime < sceneStartDelay)
             {
+                // Detener todos los ambient sounds durante el delay
+                naudioPlayer.StopAllAmbientSounds();
                 return;
             }
 
             // No reproducir sonidos si hay un menú abierto
             if (IsMenuOpen())
             {
+                // Detener todos los ambient sounds cuando hay menú abierto
+                naudioPlayer.StopAllAmbientSounds();
                 return;
             }
 
@@ -1347,26 +1378,51 @@ namespace MegabonkAccess.Components
 
                     // Calcular distancia
                     float distance = Vector3.Distance(playerPos, beaconPos);
-                    if (distance > detectionRadius) continue;
 
-                    // Intervalo dinámico: más cerca = más rápido
-                    float dynamicInterval = NAudioBeaconPlayer.CalculateInterval(distance, detectionRadius, beacon.Interval);
-
-                    // Reproducir si es tiempo
-                    if (Time.time >= beacon.NextPlayTime)
+                    // Manejar según el comportamiento
+                    if (beacon.Behavior == AudioBehavior.Ambient)
                     {
-                        // Reproducir con NAudio (pitch, volumen y pan se calculan internamente basado en distancia)
-                        naudioPlayer.PlayBeacon(
-                            playerPos,
-                            playerForward,
-                            beaconPos,
-                            detectionRadius,
-                            beacon.Volume,
-                            beacon.Pitch
-                        );
+                        // Ambient: loop continuo, actualizar volumen/pan basado en distancia
+                        if (distance <= detectionRadius)
+                        {
+                            naudioPlayer.UpdateAmbientSound(
+                                kvp.Key,
+                                playerPos,
+                                playerForward,
+                                beaconPos,
+                                detectionRadius,
+                                beacon.SoundType,
+                                beacon.Volume
+                            );
+                        }
+                        else
+                        {
+                            // Fuera de rango, detener
+                            naudioPlayer.StopAmbientSound(kvp.Key);
+                        }
+                    }
+                    else
+                    {
+                        // Beacon: one-shot con intervalo dinámico
+                        if (distance > detectionRadius) continue;
 
-                        Plugin.Log.LogDebug($"[DirectionalAudio] Playing {beacon.Type} at dist {distance:F0}, interval {dynamicInterval:F2}s");
-                        beacon.NextPlayTime = Time.time + dynamicInterval;
+                        float dynamicInterval = NAudioBeaconPlayer.CalculateInterval(distance, detectionRadius, beacon.Interval);
+
+                        if (Time.time >= beacon.NextPlayTime)
+                        {
+                            naudioPlayer.PlayBeacon(
+                                playerPos,
+                                playerForward,
+                                beaconPos,
+                                detectionRadius,
+                                beacon.SoundType,
+                                beacon.Volume,
+                                beacon.Pitch
+                            );
+
+                            Plugin.Log.LogDebug($"[DirectionalAudio] Playing {beacon.Type} ({beacon.SoundType}) at dist {distance:F0}, interval {dynamicInterval:F2}s");
+                            beacon.NextPlayTime = Time.time + dynamicInterval;
+                        }
                     }
                 }
                 catch (Exception e)
@@ -1453,6 +1509,12 @@ namespace MegabonkAccess.Components
                 {
                     if (activeBeacons.TryGetValue(id, out var beacon))
                     {
+                        // Detener ambient sound si es de tipo Ambient
+                        if (beacon?.Behavior == AudioBehavior.Ambient && naudioPlayer != null)
+                        {
+                            naudioPlayer.StopAmbientSound(id);
+                        }
+
                         if (!string.IsNullOrEmpty(beacon?.PosKey))
                         {
                             activePositions.Remove(beacon.PosKey);
@@ -1536,6 +1598,12 @@ namespace MegabonkAccess.Components
                 // Quitar beacon si existe
                 if (activeBeacons.TryGetValue(id, out var beacon))
                 {
+                    // Detener ambient sound si es de tipo Ambient
+                    if (beacon?.Behavior == AudioBehavior.Ambient && naudioPlayer != null)
+                    {
+                        naudioPlayer.StopAmbientSound(id);
+                    }
+
                     if (!string.IsNullOrEmpty(beacon?.PosKey))
                     {
                         activePositions.Remove(beacon.PosKey);

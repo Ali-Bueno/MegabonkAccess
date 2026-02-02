@@ -82,5 +82,10 @@
     <!-- Copy sounds folder -->
     <MakeDir Directories="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
     <Copy SourceFiles="sounds\beacon.wav" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
+    <Copy SourceFiles="sounds\portal.mp3" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
+    <Copy SourceFiles="sounds\shrines.mp3" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
+    <Copy SourceFiles="sounds\chests.mp3" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
+    <Copy SourceFiles="sounds\boombox.mp3" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
+    <Copy SourceFiles="sounds\microwave.mp3" DestinationFolder="D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\sounds" />
   </Target>
 </Project>

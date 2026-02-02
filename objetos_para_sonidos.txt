@@ -1,0 +1,97 @@
+MEGABONK - LISTA DE OBJETOS PARA AUDIO CUES
+============================================
+
+=== COFRES ===
+- InteractableChest (cofre normal)
+- InteractableChest gold (cofre dorado)
+
+=== SHRINES (7 tipos) ===
+- InteractableShrineGreed (shrine de codicia/apuestas)
+- InteractableShrineCursed (shrine maldito)
+- InteractableShrineMoai (shrine Moai)
+- InteractableShrineChallenge (shrine de desafio)
+- InteractableShrineBalance (shrine de balance)
+- InteractableShrineMagnet (shrine iman)
+- ChargeShrine (shrine de carga/pilon)
+
+=== PORTALES Y SALIDAS ===
+- InteractablePortal (portal normal)
+- InteractablePortalFinal (portal al jefe final)
+- InteractableBossSpawner (spawner de jefe)
+- InteractableBossSpawnerFinal (spawner jefe final)
+- InteractableGhostBossLeave (salida jefe fantasma)
+
+=== NPCs Y MERCHANTS ===
+- InteractableShadyGuy (vendedor sospechoso)
+- InteractableMicrowave (microondas NPC)
+- InteractableBoombox (boombox musica)
+
+=== ENCUENTROS ESPECIALES ===
+- InteractableCharacterFight (duelo de personaje)
+- InteractableUnlock (mecanismo de desbloqueo)
+- InteractableCage (jaula de enemigo)
+- InteractableCageKey (llave de jaula)
+
+=== OBJETOS AMBIENTALES INTERACTUABLES ===
+- InteractableGift (caja de regalo)
+- InteractableGravestone (lapida)
+- InteractableCoffin (ataud)
+- InteractableSkeletonKingStatue (estatua del Rey Esqueleto)
+- InteractableDesertGrave (tumba del desierto)
+- InteractableCrypt (cripta entrada)
+- InteractableCryptLeave (cripta salida)
+
+=== DESTRUCTIBLES ===
+- InteractablePot (vasijas/urnas/macetas)
+- InteractableTumbleWeed (rodadora)
+
+=== PICKUPS (11 tipos) ===
+- Xp (orbes de experiencia)
+- Gold (monedas de oro)
+- Health (salud/hamburguesas)
+- Silver (monedas de plata)
+- Nuke (bomba limpia pantalla)
+- Shield (escudo temporal)
+- Rage (furia/bonus dano)
+- Haste (velocidad)
+- Magnet (iman de pickups)
+- Time (manipulacion tiempo)
+- Stonks (bonus de oro)
+
+=== ZONAS PELIGROSAS ===
+- Water (agua - dano/ralentiza)
+- Lava (lava - dano fuerte)
+- DamageZone (zona de dano generica)
+- DamagePlayerTrigger (trigger de dano)
+- Boulder (roca rodante)
+- BossMeteor (meteoro de jefe)
+- CircleWarning (aviso circular de peligro)
+- TubeWarning (aviso de tubo/corredor)
+
+=== ZONAS BENEFICIOSAS ===
+- HealingZone (zona de curacion)
+- Campfire (fogata - buff/curacion)
+- JumpPad (plataforma de salto)
+
+=== ELEMENTOS DE ARENA DE JEFE ===
+- BossPylon (pilon de arena)
+- BossLamp (lampara de arena)
+- BossOrb (orbe de jefe)
+- BossOrbBleed (orbe con sangrado)
+- BossOrbShooty (orbe que dispara)
+
+=== NAVEGACION ===
+- Ladder (escalera)
+
+=== ENEMIGOS (para considerar) ===
+- Enemy (enemigo base)
+- EnemySpawner (spawner de enemigos)
+- Proyectiles enemigos varios
+
+============================================
+NOTAS:
+- Actualmente el mod detecta: cofres, shrines, portales,
+  pickups, vasijas, NPCs musicales
+- Pendiente implementar: zonas peligrosas, zonas beneficiosas,
+  elementos de jefe, enemigos
+============================================

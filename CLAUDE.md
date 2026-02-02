@@ -29,11 +29,76 @@ Accessibility is implemented as an **additional layer**, without altering the co
 - `TolkDotNet.dll` + `Tolk.dll` - Screen reader support (NVDA, JAWS, SAPI)
 
 ### Audio Assets
-- `MegabonkAccess/sounds/beacon.wav` - Custom beacon sound file
+- `MegabonkAccess/sounds/` - Audio cue sound files
+  - `beacon.wav` - Default/fallback beacon sound
+  - `chests.mp3` - Chest sound (beacon behavior)
+  - `shrines.mp3` - Shrine sound (beacon behavior)
+  - `portal.mp3` - Portal sound (ambient loop)
+  - `boombox.mp3` - Boombox NPC (ambient loop)
+  - `microwave.mp3` - Microwave NPC (ambient loop)
 
 ### Game Location
 - `D:\games\steam\steamapps\common\Megabonk\`
 - BepInEx log: `BepInEx\LogOutput.log`
+
+---
+
+## Current Priority Task
+
+### Multi-Sound Audio System with Distinct Behaviors
+
+**Status:** Functional
+
+**Goal:** Multiple distinct sounds with unique audio behaviors based on object type.
+
+#### Audio Behavior Types
+
+| Behavior | Loop | Interval (distance-based) | Pitch (distance-based) | Pan 3D | Use Case |
+|----------|------|---------------------------|------------------------|--------|----------|
+| **Beacon** | No | Yes (faster when closer) | Yes (higher when closer) | Yes | Interactables (chests, shrines, pots) |
+| **Ambient** | Yes (PlaybackStopped event) | No | No | Yes | Portals, boombox, microwave |
+
+#### Current Sound Files (in `sounds/` folder)
+
+| File | Type | Behavior | Interval | Objects |
+|------|------|----------|----------|---------|
+| `chests.mp3` | chest | Beacon | 1.5s base | All chests (normal + gold) |
+| `shrines.mp3` | shrine | Beacon | 3.0s base | All shrines |
+| `portal.mp3` | portal | Ambient (loop) | - | All portals |
+| `boombox.mp3` | boombox | Ambient (loop) | - | Boombox NPC |
+| `microwave.mp3` | microwave | Ambient (loop) | - | Microwave NPC |
+| `beacon.wav` | default | Beacon | 2.5s base | Fallback for everything else |
+
+#### NAudio Ambient Loop Implementation
+Ambient sounds use `WaveOutEvent.PlaybackStopped` event to restart playback when finished:
+```csharp
+waveOut.PlaybackStopped += (sender, args) => {
+    if (!ambientData.IsDisposed && ambientSounds.ContainsKey(targetId)) {
+        reader.Position = 0;
+        waveOut.Play();
+    }
+};
+```
+
+#### Pending Sound Files
+
+**Interactables (Beacon behavior):**
+- `pot.wav` / `urn.wav` - Vasijas/urnas
+- `npc.wav` - NPCs (ShadyGuy, etc.)
+
+**Pickups (Beacon behavior):**
+- `pickup_health.wav` - Salud
+- `pickup_gold.wav` - Oro
+- `pickup_xp.wav` - Experiencia
+- `pickup_special.wav` - Powerups
+
+**Hazards (to implement):**
+- `hazard_water.wav` - Agua
+- `hazard_lava.wav` - Lava
+
+#### Object Categories Reference
+
+See `objetos_para_sonidos.txt` for complete list of game objects.
 
 ---
 
@@ -115,7 +180,10 @@ Detection methods in `IsMenuOpen()`:
 - Death buttons: `B_Continue`, `ContinueButton`, `RestartButton`, `StatsButton`
 
 ##### Known Issues / TODO
-- None currently
+- [x] **Multi-sound system** - Implemented: chests, shrines, portals, boombox, microwave
+- [ ] **More sounds** - Add pot/urn, npc, pickup sounds
+- [ ] **Hazard detection** - Add Water, Lava, DamageZone, Boulder detection
+- [ ] **Beneficial zone detection** - Add HealingZone, Campfire detection
 
 ##### Fixed Bugs
 1. **Gold chests not detected proactively**: The issue was that chests were found by `GameObject.Find()` but beacons weren't created because they were outside the detection radius. Fixed by removing distance check for chest beacon creation - chests now get beacons immediately when found, and sound only plays when player enters range. Added `ScanAllChests()` method with `ProcessChestObject()` that creates beacons without distance verification.
@@ -305,7 +373,7 @@ Auto-copies to: `D:\games\steam\steamapps\common\Megabonk\BepInEx\plugins\`
 - `MegabonkAccess.dll` - Main plugin
 - `NAudio.dll`, `NAudio.Core.dll`, `NAudio.Wasapi.dll`, `NAudio.WinMM.dll` - Audio library
 - `TolkDotNet.dll` - Screen reader wrapper
-- `sounds/beacon.wav` - Beacon sound file
+- `sounds/` - All sound files (beacon.wav, chests.mp3, shrines.mp3, portal.mp3, boombox.mp3, microwave.mp3)
 - `Tolk.dll`, `nvdaControllerClient64.dll` - To game root folder
 
 ---
