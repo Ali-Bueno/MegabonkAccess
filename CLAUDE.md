@@ -237,28 +237,49 @@ Detection methods in `IsMenuOpen()`:
 
 #### Wall Navigation Audio System
 
-**Status:** Basic implementation (needs polish)
+**Status:** Functional
 
 ##### Overview
-Continuous sine wave audio feedback for wall proximity detection. Helps blind players navigate the map by providing audio cues when walls are nearby.
+Soft audio feedback for wall proximity detection + collision sound. Helps blind players navigate the map by providing:
+1. Subtle continuous tones when walls are nearby
+2. 8-bit "thump" sound when colliding with walls (SMB3 style)
 
-##### Frequencies
+##### Frequencies (Softer than before)
 | Direction | Frequency | Description |
 |-----------|-----------|-------------|
-| Forward | 900 Hz | High pitch - wall ahead |
-| Back | 250 Hz | Low pitch - wall behind |
-| Left/Right | 450 Hz | Medium pitch - walls to sides |
+| Forward | 500 Hz | Medium - wall ahead |
+| Back | 180 Hz | Low - wall behind |
+| Left/Right | 300 Hz | Medium-low - walls to sides |
 
 ##### Audio Behavior
-- **Continuous sine waves** generated with NAudio `SineWaveGenerator`
+- **Soft triangle waves** mixed with sine (70% triangle + 30% sine) - much less harsh than pure sine
+- **Low volume** (0.15 base) - subtle background awareness
 - **Volume based on distance**: closer = louder (quadratic curve)
 - **Stereo panning** for left/right walls (-1.0 to +1.0)
-- **Smooth transitions** to avoid clicks/pops (volume and frequency smoothing)
+- **Smooth transitions** to avoid clicks/pops
+
+##### Collision Sound (8-bit Style)
+When player moves into a wall:
+- **Square wave** at 100 Hz descending to 50 Hz
+- **60ms duration** - short and punchy
+- **Exponential decay** - "thump" feel like SMB3
+- **Cooldown**: 0.3 seconds between collision sounds
+- **Trigger distance**: 1.5 units from wall while moving toward it
+
+```csharp
+// CollisionSoundGenerator configuration
+startFrequency = 100;  // Very low, SMB3-style bump
+totalSamples = sampleRate * 0.06;  // 60ms
+volume = 0.35f;
+// Pitch descends 50% during playback
+// Exponential (squared) envelope for punch
+```
 
 ##### Detection
 - Uses `Physics.Raycast` from player position
 - Layer mask: all layers (-1)
-- Max detection distance: 15 units
+- Max detection distance: 12 units
+- Collision detection: raycast in movement direction
 - Updates every frame for responsiveness
 
 ##### Menu Detection
@@ -277,18 +298,14 @@ Uses same `IsMenuOpen()` logic as DirectionalAudioManager:
 
 ##### Configuration (constants in code)
 ```csharp
-private const double FREQ_FORWARD = 900;   // Hz
-private const double FREQ_BACK = 250;      // Hz
-private const double FREQ_SIDES = 450;     // Hz
-private float maxWallDistance = 15f;       // units
-private float baseVolume = 0.4f;           // 0-1
+private const double FREQ_FORWARD = 500;   // Hz (lowered from 900)
+private const double FREQ_BACK = 180;      // Hz (lowered from 250)
+private const double FREQ_SIDES = 300;     // Hz (lowered from 450)
+private float maxWallDistance = 12f;       // units
+private float baseVolume = 0.15f;          // Very low
+private float collisionDistance = 1.5f;    // Collision trigger distance
+private float collisionCooldown = 0.3f;    // Seconds between collision sounds
 ```
-
-##### TODO
-- [ ] Add toggle keybind to enable/disable
-- [ ] Make frequencies/distances configurable
-- [ ] Add floor/ceiling detection for height awareness
-- [ ] Consider different sound types instead of pure sine waves
 
 ---
 
@@ -500,8 +517,9 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 ### Components
 - `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
 - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
-- `WallNavigationAudio.cs` - Wall detection system with sine wave audio feedback
+- `WallNavigationAudio.cs` - Wall detection with soft triangle waves + 8-bit collision sound
 - `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (localized names)
+- `NavigationAudioSystem.cs` - Wind-based objective guidance (currently disabled, experimental)
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search

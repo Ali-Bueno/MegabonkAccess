@@ -8,7 +8,8 @@ using Il2CppInterop.Runtime.Injection;
 namespace MegabonkAccess.Components
 {
     /// <summary>
-    /// Genera una onda sinusoidal continua con frecuencia, volumen y pan ajustables en tiempo real.
+    /// Genera una onda suave (triangular + armónicos) con frecuencia, volumen y pan ajustables.
+    /// Mucho más agradable que ondas sinusoidales puras.
     /// </summary>
     public class SineWaveGenerator : ISampleProvider
     {
@@ -19,9 +20,9 @@ namespace MegabonkAccess.Components
         private float targetVolume;
         private float currentVolume;
 
-        // Suavizado para evitar clicks/pops
-        private const float FREQUENCY_SMOOTHING = 0.1f;
-        private const float VOLUME_SMOOTHING = 0.05f;
+        // Suavizado más agresivo para transiciones ultra suaves
+        private const float FREQUENCY_SMOOTHING = 0.05f;
+        private const float VOLUME_SMOOTHING = 0.02f;
 
         public WaveFormat WaveFormat => waveFormat;
 
@@ -57,8 +58,15 @@ namespace MegabonkAccess.Components
                 currentFrequency += (targetFrequency - currentFrequency) * FREQUENCY_SMOOTHING;
                 currentVolume += (targetVolume - currentVolume) * VOLUME_SMOOTHING;
 
-                // Generar muestra sinusoidal
-                buffer[offset + i] = (float)(currentVolume * Math.Sin(2 * Math.PI * phase));
+                // Generar onda triangular suave (menos harsh que sinusoidal pura)
+                // Triangular: sube y baja linealmente, sin los "picos" de la sinusoidal
+                double triangleWave = 2.0 * Math.Abs(2.0 * phase - 1.0) - 1.0;
+
+                // Mezclar con un poco de sinusoidal para suavizar más
+                double sineWave = Math.Sin(2 * Math.PI * phase);
+                double mixedWave = triangleWave * 0.7 + sineWave * 0.3;
+
+                buffer[offset + i] = (float)(currentVolume * mixedWave);
 
                 // Avanzar fase
                 phase += currentFrequency / sampleRate;
@@ -106,25 +114,103 @@ namespace MegabonkAccess.Components
     }
 
     /// <summary>
-    /// Sistema de navegación por audio que detecta paredes y emite tonos sinusoidales.
-    /// - Frecuencia aguda: pared adelante
-    /// - Frecuencia grave: pared detrás
-    /// - Frecuencia media: paredes a los lados (con paneo estéreo)
-    /// - Volumen proporcional a la cercanía de la pared
+    /// Generador de sonido de colisión 8-bits estilo SMB3.
+    /// "Thump" grave y corto cuando chocas con pared.
+    /// </summary>
+    public class CollisionSoundGenerator : ISampleProvider
+    {
+        private readonly WaveFormat waveFormat;
+        private double phase;
+        private int samplesRemaining;
+        private double currentFrequency;
+        private double startFrequency;
+        private float volume;
+        private readonly int totalSamples;
+        private readonly object playLock = new object();
+
+        public WaveFormat WaveFormat => waveFormat;
+
+        public CollisionSoundGenerator(int sampleRate = 44100)
+        {
+            waveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2); // Stereo
+            totalSamples = (int)(sampleRate * 0.06); // 60ms - muy corto y seco
+            samplesRemaining = 0;
+            volume = 0.35f;
+        }
+
+        /// <summary>
+        /// Dispara el sonido de colisión.
+        /// </summary>
+        public void Play(float pan = 0f)
+        {
+            lock (playLock)
+            {
+                startFrequency = 100; // Muy grave, tipo SMB3 bump
+                currentFrequency = startFrequency;
+                samplesRemaining = totalSamples;
+                phase = 0;
+            }
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            lock (playLock)
+            {
+                for (int i = 0; i < count; i += 2)
+                {
+                    float sample = 0;
+
+                    if (samplesRemaining > 0)
+                    {
+                        // Onda cuadrada (8-bits)
+                        sample = phase < 0.5 ? volume : -volume;
+
+                        // Pitch baja rápido al inicio (efecto "thump")
+                        double progress = 1.0 - (double)samplesRemaining / totalSamples;
+                        currentFrequency = startFrequency * (1.0 - progress * 0.5); // Baja a 50Hz
+
+                        // Decay rápido exponencial
+                        float envelope = (float)Math.Pow((double)samplesRemaining / totalSamples, 2);
+                        sample *= envelope;
+
+                        // Avanzar fase
+                        phase += currentFrequency / waveFormat.SampleRate;
+                        if (phase >= 1.0)
+                            phase -= 1.0;
+
+                        samplesRemaining--;
+                    }
+
+                    // Stereo (mismo en ambos canales por ahora)
+                    buffer[offset + i] = sample;     // Left
+                    buffer[offset + i + 1] = sample; // Right
+                }
+            }
+
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Sistema de navegación por audio que detecta paredes con tonos suaves.
+    /// - Tono medio-agudo: pared adelante
+    /// - Tono grave: pared detrás
+    /// - Tono medio: paredes a los lados (con paneo estéreo)
+    /// - Volumen bajo y sutil, proporcional a la cercanía
     /// </summary>
     public class WallNavigationAudio : MonoBehaviour
     {
         public static WallNavigationAudio Instance { get; private set; }
 
-        // Configuración de frecuencias (Hz)
-        private const double FREQ_FORWARD = 900;   // Agudo - pared adelante
-        private const double FREQ_BACK = 250;      // Grave - pared detrás
-        private const double FREQ_SIDES = 450;     // Medio - paredes a los lados (mismo para ambos)
+        // Configuración de frecuencias (Hz) - más graves y menos molestas
+        private const double FREQ_FORWARD = 500;   // Medio - pared adelante (bajado de 900)
+        private const double FREQ_BACK = 180;      // Grave - pared detrás (bajado de 250)
+        private const double FREQ_SIDES = 300;     // Medio-grave - paredes a los lados (bajado de 450)
 
         // Configuración de detección
-        private float maxWallDistance = 15f;       // Distancia máxima de detección
+        private float maxWallDistance = 12f;       // Distancia máxima de detección (reducida)
         private float minVolumeDistance = 0.5f;    // Distancia mínima (volumen máximo)
-        private float baseVolume = 0.4f;           // Volumen base (ajustar según preferencia)
+        private float baseVolume = 0.15f;          // Volumen base MUY bajo (de 0.4 a 0.15)
 
         // Canales de audio (uno por dirección)
         private Dictionary<WallDirection, WallAudioChannel> channels = new Dictionary<WallDirection, WallAudioChannel>();
@@ -150,6 +236,15 @@ namespace MegabonkAccess.Components
         // Death camera tracking (cached for performance)
         private GameObject cachedDeathCamera = null;
         private float nextDeathCameraSearchTime = 0f;
+
+        // Sistema de sonido de colisión 8-bits
+        private CollisionSoundGenerator collisionGenerator;
+        private WaveOutEvent collisionOutput;
+        private float collisionDistance = 1.5f;      // Distancia para activar sonido de colisión
+        private float lastCollisionTime = 0f;
+        private float collisionCooldown = 0.3f;      // Cooldown entre sonidos de colisión
+        private Vector3 lastPlayerPosition;
+        private bool wasColliding = false;
 
         static WallNavigationAudio()
         {
@@ -185,12 +280,31 @@ namespace MegabonkAccess.Components
                 // Crear canales de audio para cada dirección
                 CreateAudioChannels();
 
+                // Crear el generador de sonido de colisión 8-bits
+                CreateCollisionSound();
+
                 isInitialized = true;
-                Plugin.Log.LogInfo($"[WallNav] Initialized with maxDistance={maxWallDistance}, baseVolume={baseVolume}");
+                Plugin.Log.LogInfo($"[WallNav] Initialized with maxDistance={maxWallDistance}, baseVolume={baseVolume}, collision sound enabled");
             }
             catch (Exception e)
             {
                 Plugin.Log.LogError($"[WallNav] Initialize error: {e.Message}");
+            }
+        }
+
+        private void CreateCollisionSound()
+        {
+            try
+            {
+                collisionGenerator = new CollisionSoundGenerator();
+                collisionOutput = new WaveOutEvent();
+                collisionOutput.Init(collisionGenerator);
+                collisionOutput.Play();
+                Plugin.Log.LogInfo("[WallNav] Collision sound generator created");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError($"[WallNav] CreateCollisionSound error: {e.Message}");
             }
         }
 
@@ -316,10 +430,64 @@ namespace MegabonkAccess.Components
 
                 // Actualizar detección de paredes cada frame
                 UpdateWallDetection();
+
+                // Detectar colisiones y reproducir sonido 8-bits
+                CheckCollision();
             }
             catch (Exception e)
             {
                 Plugin.Log.LogError($"[WallNav] Update error: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Detecta si el jugador está muy cerca de una pared (colisión) y reproduce el sonido 8-bits.
+        /// </summary>
+        private void CheckCollision()
+        {
+            if (playerTransform == null || collisionGenerator == null) return;
+
+            try
+            {
+                Vector3 playerPos = playerTransform.position;
+                Vector3 origin = playerPos + Vector3.up * 1.0f;
+
+                // Verificar si el jugador se está moviendo
+                Vector3 movement = playerPos - lastPlayerPosition;
+                float movementMagnitude = movement.magnitude;
+                lastPlayerPosition = playerPos;
+
+                // Solo detectar colisión si el jugador se está moviendo
+                if (movementMagnitude < 0.01f) return;
+
+                // Normalizar la dirección de movimiento
+                Vector3 moveDir = movement.normalized;
+
+                // Raycast en la dirección de movimiento
+                bool hitWall = Physics.Raycast(origin, moveDir, out RaycastHit hit, collisionDistance, wallLayerMask);
+
+                if (hitWall && hit.distance < collisionDistance)
+                {
+                    // Estamos cerca de una pared en la dirección de movimiento
+                    if (!wasColliding && Time.time - lastCollisionTime > collisionCooldown)
+                    {
+                        // Nueva colisión - reproducir sonido
+                        collisionGenerator.Play();
+                        lastCollisionTime = Time.time;
+
+                        if (debugCounter % 60 == 0)
+                            Plugin.Log.LogInfo($"[WallNav] Collision! Distance: {hit.distance:F2}");
+                    }
+                    wasColliding = true;
+                }
+                else
+                {
+                    wasColliding = false;
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[WallNav] CheckCollision error: {e.Message}");
             }
         }
 
@@ -645,6 +813,14 @@ namespace MegabonkAccess.Components
                 }
                 channels.Clear();
             }
+
+            // Limpiar el sonido de colisión
+            try
+            {
+                collisionOutput?.Stop();
+                collisionOutput?.Dispose();
+            }
+            catch { }
 
             Instance = null;
             Plugin.Log.LogInfo("[WallNav] Destroyed");

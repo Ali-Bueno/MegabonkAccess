@@ -53,13 +53,13 @@ public class Plugin : BasePlugin
             // Añadir el sistema de beacons para objetos interactuables
             _audioManagerObject.AddComponent<DirectionalAudioManager>();
 
-            // Añadir el sistema de navegación por paredes
+            // Añadir el sistema de paredes (suavizado) + sonido de colisión
             _audioManagerObject.AddComponent<WallNavigationAudio>();
 
             // Añadir el sistema de anuncios de enemigos
             _audioManagerObject.AddComponent<EnemyAnnouncementSystem>();
 
-            Log.LogInfo("[Plugin] Directional audio, wall navigation, and enemy announcement systems created successfully!");
+            Log.LogInfo("[Plugin] All audio systems created successfully!");
         }
         catch (System.Exception e)
         {
