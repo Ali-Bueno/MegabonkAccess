@@ -56,7 +56,10 @@ public class Plugin : BasePlugin
             // Añadir el sistema de navegación por paredes
             _audioManagerObject.AddComponent<WallNavigationAudio>();
 
-            Log.LogInfo("[Plugin] Directional audio and wall navigation systems created successfully!");
+            // Añadir el sistema de anuncios de enemigos
+            _audioManagerObject.AddComponent<EnemyAnnouncementSystem>();
+
+            Log.LogInfo("[Plugin] Directional audio, wall navigation, and enemy announcement systems created successfully!");
         }
         catch (System.Exception e)
         {

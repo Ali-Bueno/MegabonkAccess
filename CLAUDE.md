@@ -292,6 +292,96 @@ private float baseVolume = 0.4f;           // 0-1
 
 ---
 
+#### Enemy Announcement System
+
+**Status:** Functional (needs polish)
+
+##### Overview
+Automatic announcement system that tells the player about nearby enemies via screen reader. Uses Harmony patches to track enemies when they spawn/die.
+
+##### Enemy Tracking (Harmony Patches)
+```csharp
+// EnemyPatch.cs - Tracks enemies via Harmony
+[HarmonyPatch(typeof(Enemy), nameof(Enemy.InitEnemy))]  // Register on spawn
+[HarmonyPatch(typeof(Enemy), nameof(Enemy.Kill))]       // Unregister on death
+
+public static class EnemyTracker
+{
+    private static HashSet<Enemy> activeEnemies;
+    public static IEnumerable<Enemy> GetActiveEnemies();
+    public static void CleanupDeadEnemies();  // Remove null/inactive
+}
+```
+
+##### Automatic Triggers
+
+| Trigger | Condition | Cooldown | What it announces |
+|---------|-----------|----------|-------------------|
+| **Direction change** | Camera rotates >45° | 3 seconds | Enemies in forward direction (60° cone) |
+| **Close threat** | Enemy enters <20 units | 4 seconds | New enemies grouped by direction + type |
+| **Boss/Elite spawn** | Boss or Elite appears | 4 seconds | Enemy type + direction |
+
+##### Compact Output Format
+Groups enemies by direction AND type to reduce verbosity:
+```
+"3 Esqueletos adelante, 2 Goblins atrás"
+"Jefe Faraón adelante, Élite Momia derecha, +5 más"
+```
+- Max 4 groups per announcement
+- Shows "+X más" if more enemies not mentioned
+- Bosses/Elites always mentioned first
+
+##### Direction Detection
+- **Adelante/Ahead:** -45° to +45° from camera forward
+- **Derecha/Right:** +45° to +135°
+- **Izquierda/Left:** -45° to -135°
+- **Atrás/Behind:** +135° to +180° and -135° to -180°
+
+##### Enemy Information
+| Property | Source | Notes |
+|----------|--------|-------|
+| Name | `enemyData.GetName()` | Localized name from EnemyData |
+| Fallback | `enemyData.name` | ScriptableObject name |
+| Boss | `enemy.IsBoss()`, `IsStageBoss()`, `IsFinalBoss()` | Prefixed with "Jefe" |
+| Elite | `enemy.IsElite()` | Prefixed with "Élite" |
+| Alive | `enemy.IsDead()` | Only living enemies |
+| Position | `enemy.GetCenterPosition()` | For direction calculation |
+
+##### IL2CPP Workaround
+Direct access to `enemyData.enemyName` (EEnemy enum) causes IL2CPP errors. Solution:
+- Use `enemyData.GetName()` method instead (returns localized string)
+- Fallback to `enemyData.name` (ScriptableObject name)
+- Final fallback to cleaned `gameObject.name`
+
+##### Threat Tracking
+- **knownCloseEnemies:** Set of enemy IDs within danger distance
+- **knownBossesElites:** Set of Boss/Elite enemy IDs
+- New threats = enemies not in these sets
+- Sets cleared on scene change
+
+##### Configuration (constants in code)
+```csharp
+private float dangerDistance = 20f;           // Close threat distance
+private float maxTrackingDistance = 50f;      // Max tracking range
+private float directionChangeCooldown = 3f;   // After direction announce
+private float threatAnnounceCooldown = 4f;    // After threat announce
+private float directionChangeThreshold = 45f; // Degrees to trigger
+```
+
+##### Menu Detection
+Silences during:
+- TimeScale < 0.1 (pause)
+- Pause menu, chest window, upgrade buttons
+- ChestAnimationTracker, MenuStateTracker, EncounterMenuTracker
+
+##### TODO
+- [ ] Make cooldowns/distances configurable
+- [ ] Add health percentage for bosses
+- [ ] Consider proximity-based urgency (faster speech when very close)
+- [ ] Fine-tune grouping and announcement frequency
+
+---
+
 ## TolkUtil Coordination System
 
 ### Purpose
@@ -405,11 +495,13 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 - `UnlockPatch.cs` - Unlock footer (delayed speech)
 - `UpgradeButtonPatch.cs` - Level-up menu + MenuStateTracker
 - `ChestWindowUiPatch.cs` - Chest contents + ChestAnimationTracker + window open/close
+- `EnemyPatch.cs` - Enemy tracking via InitEnemy/Kill patches + EnemyTracker static class
 
 ### Components
 - `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
 - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
 - `WallNavigationAudio.cs` - Wall detection system with sine wave audio feedback
+- `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (localized names)
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search
