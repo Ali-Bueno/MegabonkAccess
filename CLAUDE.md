@@ -235,6 +235,63 @@ Detection methods in `IsMenuOpen()`:
 
 ---
 
+#### Wall Navigation Audio System
+
+**Status:** Basic implementation (needs polish)
+
+##### Overview
+Continuous sine wave audio feedback for wall proximity detection. Helps blind players navigate the map by providing audio cues when walls are nearby.
+
+##### Frequencies
+| Direction | Frequency | Description |
+|-----------|-----------|-------------|
+| Forward | 900 Hz | High pitch - wall ahead |
+| Back | 250 Hz | Low pitch - wall behind |
+| Left/Right | 450 Hz | Medium pitch - walls to sides |
+
+##### Audio Behavior
+- **Continuous sine waves** generated with NAudio `SineWaveGenerator`
+- **Volume based on distance**: closer = louder (quadratic curve)
+- **Stereo panning** for left/right walls (-1.0 to +1.0)
+- **Smooth transitions** to avoid clicks/pops (volume and frequency smoothing)
+
+##### Detection
+- Uses `Physics.Raycast` from player position
+- Layer mask: all layers (-1)
+- Max detection distance: 15 units
+- Updates every frame for responsiveness
+
+##### Menu Detection
+Uses same `IsMenuOpen()` logic as DirectionalAudioManager:
+- TimeScale check (pause menu)
+- Pause menu objects
+- ChestAnimationTracker
+- MenuStateTracker
+- EncounterMenuTracker
+- DeathCamera check
+- Death buttons
+
+##### Scene Handling
+- 4-second delay after scene load (skip intro cinematic)
+- Silences during non-gameplay scenes (MainMenu, LoadingScreen, etc.)
+
+##### Configuration (constants in code)
+```csharp
+private const double FREQ_FORWARD = 900;   // Hz
+private const double FREQ_BACK = 250;      // Hz
+private const double FREQ_SIDES = 450;     // Hz
+private float maxWallDistance = 15f;       // units
+private float baseVolume = 0.4f;           // 0-1
+```
+
+##### TODO
+- [ ] Add toggle keybind to enable/disable
+- [ ] Make frequencies/distances configurable
+- [ ] Add floor/ceiling detection for height awareness
+- [ ] Consider different sound types instead of pure sine waves
+
+---
+
 ## TolkUtil Coordination System
 
 ### Purpose
@@ -352,6 +409,7 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 ### Components
 - `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
 - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
+- `WallNavigationAudio.cs` - Wall detection system with sine wave audio feedback
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search

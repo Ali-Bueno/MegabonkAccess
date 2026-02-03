@@ -50,10 +50,13 @@ public class Plugin : BasePlugin
             _audioManagerObject = new GameObject("MegabonkAccessibility_DirectionalAudio");
             GameObject.DontDestroyOnLoad(_audioManagerObject);
 
-            // Añadir el nuevo sistema de audio direccional 3D
+            // Añadir el sistema de beacons para objetos interactuables
             _audioManagerObject.AddComponent<DirectionalAudioManager>();
 
-            Log.LogInfo("[Plugin] Directional audio system created successfully!");
+            // Añadir el sistema de navegación por paredes
+            _audioManagerObject.AddComponent<WallNavigationAudio>();
+
+            Log.LogInfo("[Plugin] Directional audio and wall navigation systems created successfully!");
         }
         catch (System.Exception e)
         {
