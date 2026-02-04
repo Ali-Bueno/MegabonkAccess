@@ -56,8 +56,11 @@ public class Plugin : BasePlugin
             // Añadir el sistema de paredes (suavizado) + sonido de colisión
             _audioManagerObject.AddComponent<WallNavigationAudio>();
 
-            // Añadir el sistema de anuncios de enemigos
+            // Añadir el sistema de anuncios de enemigos (TTS)
             _audioManagerObject.AddComponent<EnemyAnnouncementSystem>();
+
+            // Añadir el sistema de audio direccional para enemigos (sonido sintético)
+            _audioManagerObject.AddComponent<EnemyAudioSystem>();
 
             Log.LogInfo("[Plugin] All audio systems created successfully!");
         }

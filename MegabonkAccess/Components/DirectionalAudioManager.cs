@@ -61,8 +61,8 @@ namespace MegabonkAccess.Components
             // Shrines - ambient loop (shrines.mp3)
             { "shrine", (1.0f, 0f, 0.8f, "shrine") },
 
-            // Portales de jefe - ambient loop (portal.mp3) - intervalo no se usa
-            { "boss_portal", (1.0f, 0f, 0.8f, "portal") },
+            // Portales de jefe - ambient loop (portal.mp3) - intervalo no se usa - volumen más alto
+            { "boss_portal", (1.0f, 0f, 1.2f, "portal") },
 
             // NPCs especiales - beacon behavior (no loop)
             { "boombox", (1.0f, 2.5f, 0.8f, "boombox") },
@@ -1400,17 +1400,19 @@ namespace MegabonkAccess.Components
                     // Verificar si el Target fue destruido o desactivado
                     try
                     {
+                        bool isPortal = beacon.Type == "portal" || beacon.Type == "boss_portal";
+
                         if (beacon.Target == null || !beacon.Target.activeInHierarchy)
                         {
-                            // Para beacons Ambient (portales), NO eliminar aunque el objeto se destruya
-                            // Seguirá sonando en la última posición conocida
-                            if (beacon.Behavior == AudioBehavior.Ambient)
+                            // Solo los PORTALES continúan sonando después de que el objeto sea destruido
+                            // Los shrines y otros objetos deben dejar de sonar
+                            if (isPortal)
                             {
-                                // Mantener el beacon ambient, solo actualizar que el target ya no existe
+                                // Mantener el beacon de portal, solo actualizar que el target ya no existe
                                 continue;
                             }
 
-                            // Target fue destruido o desactivado, eliminar beacon
+                            // Target fue destruido o desactivado, eliminar beacon (incluyendo shrines)
                             if (!string.IsNullOrEmpty(beacon.PosKey))
                             {
                                 activePositions.Remove(beacon.PosKey);
@@ -1423,27 +1425,41 @@ namespace MegabonkAccess.Components
                         // Verificar si el interactable ya no puede ser interactuado (fue usado)
                         // SKIP para pickups - se manejan diferente
                         // SKIP para portales - deben seguir sonando hasta que el jugador entre
-                        // Los shrines SÍ deben eliminarse cuando CanInteract=false (solo se usan una vez)
-                        bool isPortal = beacon.Type == "portal" || beacon.Type == "boss_portal";
+                        // Los shrines SÍ deben eliminarse cuando CanInteract=false o done=true
                         if (!beacon.Type.StartsWith("pickup_") && !isPortal)
                         {
                             var interactable = beacon.Target.GetComponent<BaseInteractable>();
                             if (interactable != null)
                             {
+                                bool shouldRemove = false;
+
+                                // Verificar CanInteract()
                                 try
                                 {
                                     if (!interactable.CanInteract())
                                     {
-                                        if (!string.IsNullOrEmpty(beacon.PosKey))
-                                        {
-                                            activePositions.Remove(beacon.PosKey);
-                                        }
-                                        toRemove.Add(kvp.Key);
-                                        Plugin.Log.LogDebug($"[DirectionalAudio] Removed beacon for used interactable: {beacon.Type}");
-                                        continue;
+                                        shouldRemove = true;
+                                        Plugin.Log.LogDebug($"[DirectionalAudio] {beacon.Type} CanInteract=false");
                                     }
                                 }
-                                catch { } // CanInteract puede fallar, ignorar
+                                catch { }
+
+                                // Verificar campo "done" para shrines específicos
+                                if (!shouldRemove && beacon.Type == "shrine")
+                                {
+                                    shouldRemove = IsShrineUsed(beacon.Target);
+                                }
+
+                                if (shouldRemove)
+                                {
+                                    if (!string.IsNullOrEmpty(beacon.PosKey))
+                                    {
+                                        activePositions.Remove(beacon.PosKey);
+                                    }
+                                    toRemove.Add(kvp.Key);
+                                    Plugin.Log.LogInfo($"[DirectionalAudio] Removed beacon for used interactable: {beacon.Type}");
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -1577,6 +1593,71 @@ namespace MegabonkAccess.Components
             {
                 Plugin.Log.LogDebug($"[DirectionalAudio] RemoveInteractedBeacon error: {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// Verifica si un shrine ha sido usado verificando el campo "done" o "completed" usando reflexión.
+        /// </summary>
+        private bool IsShrineUsed(GameObject obj)
+        {
+            if (obj == null) return false;
+
+            try
+            {
+                // Obtener el componente BaseInteractable
+                var interactable = obj.GetComponent<BaseInteractable>();
+                if (interactable == null) return false;
+
+                // Usar reflexión para buscar el campo "done" o "completed"
+                var type = interactable.GetType();
+
+                // Buscar campo "done"
+                var doneField = type.GetProperty("done");
+                if (doneField != null)
+                {
+                    try
+                    {
+                        var value = doneField.GetValue(interactable);
+                        if (value is bool done && done)
+                        {
+                            Plugin.Log.LogDebug($"[DirectionalAudio] {type.Name} done=true");
+                            return true;
+                        }
+                    }
+                    catch { }
+                }
+
+                // Buscar campo "completed" (para ChargeShrine)
+                var completedField = type.GetProperty("completed");
+                if (completedField != null)
+                {
+                    try
+                    {
+                        var value = completedField.GetValue(interactable);
+                        if (value is bool completed && completed)
+                        {
+                            Plugin.Log.LogDebug($"[DirectionalAudio] {type.Name} completed=true");
+                            return true;
+                        }
+                    }
+                    catch { }
+                }
+
+                // También verificar si el objeto tiene FX desactivados (señal de que fue usado)
+                // Los shrines usados suelen desactivar sus efectos visuales
+                var fxLoopTransform = obj.transform.Find("fxLoop");
+                if (fxLoopTransform != null && !fxLoopTransform.gameObject.activeInHierarchy)
+                {
+                    Plugin.Log.LogDebug($"[DirectionalAudio] Shrine fxLoop inactive - likely used");
+                    return true;
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[DirectionalAudio] IsShrineUsed error: {e.Message}");
+            }
+
+            return false;
         }
 
         void OnDestroy()

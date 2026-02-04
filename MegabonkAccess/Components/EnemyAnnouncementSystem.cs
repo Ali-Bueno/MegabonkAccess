@@ -20,7 +20,7 @@ namespace MegabonkAccess.Components
         private float dangerDistance = 20f;           // Distance to consider "close"
         private float maxTrackingDistance = 50f;      // Max distance to track enemies
         private float directionChangeCooldown = 3f;   // Cooldown between direction announcements
-        private float threatAnnounceCooldown = 4f;    // Cooldown between threat announcements
+        private float threatAnnounceCooldown = 2f;    // Cooldown between threat announcements
         private float directionChangeThreshold = 45f; // Degrees to trigger direction change
         private float enemyScanInterval = 0.5f;
 

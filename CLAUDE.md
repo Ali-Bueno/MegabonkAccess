@@ -232,6 +232,7 @@ Detection methods in `IsMenuOpen()`:
 12. **Ambient beacons removed when target destroyed**: Skip removal for Ambient behavior beacons.
 13. **Localized text breaking detection**: Removed all localized text checks, use only object/component names.
 14. **Shrine sounds persisting after use**: Shrine ambient beacons now removed when `CanInteract()` is false (portals excluded).
+15. **Shrine detection via reflection**: Added `IsShrineUsed()` method that checks `done` and `completed` properties via reflection (avoids IL2CPP issues with direct property access).
 
 ---
 
@@ -335,8 +336,8 @@ public static class EnemyTracker
 | Trigger | Condition | Cooldown | What it announces |
 |---------|-----------|----------|-------------------|
 | **Direction change** | Camera rotates >45° | 3 seconds | Enemies in forward direction (60° cone) |
-| **Close threat** | Enemy enters <20 units | 4 seconds | New enemies grouped by direction + type |
-| **Boss/Elite spawn** | Boss or Elite appears | 4 seconds | Enemy type + direction |
+| **Close threat** | Enemy enters <20 units | 2 seconds | New enemies grouped by direction + type |
+| **Boss/Elite spawn** | Boss or Elite appears | 2 seconds | Enemy type + direction |
 
 ##### Compact Output Format
 Groups enemies by direction AND type to reduce verbosity:
@@ -381,7 +382,7 @@ Direct access to `enemyData.enemyName` (EEnemy enum) causes IL2CPP errors. Solut
 private float dangerDistance = 20f;           // Close threat distance
 private float maxTrackingDistance = 50f;      // Max tracking range
 private float directionChangeCooldown = 3f;   // After direction announce
-private float threatAnnounceCooldown = 4f;    // After threat announce
+private float threatAnnounceCooldown = 2f;    // After threat announce (reduced from 4s)
 private float directionChangeThreshold = 45f; // Degrees to trigger
 ```
 
@@ -396,6 +397,131 @@ Silences during:
 - [ ] Add health percentage for bosses
 - [ ] Consider proximity-based urgency (faster speech when very close)
 - [ ] Fine-tune grouping and announcement frequency
+
+---
+
+#### Enemy Audio System (Synthetic Directional Audio)
+
+**Status:** Functional
+
+##### Overview
+Real-time synthetic audio feedback for enemy positions. Generates square/triangle wave beeps with 3D panning to indicate enemy presence and direction. Groups enemies by direction to avoid sound spam.
+
+##### Directional Grouping
+Enemies are grouped into 4 directions (one sound per direction):
+- **Forward (0):** -45° to +45° from camera forward
+- **Right (1):** +45° to +135°
+- **Back (2):** +135° to +180° and -135° to -180°
+- **Left (3):** -45° to -135°
+
+##### Sound Characteristics
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Waveform | 60% square + 40% triangle | Softer than pure square |
+| Duration | 80ms | Short beep |
+| Base volume | 0.15-0.5 | Comfortable range |
+| Interval (far) | 0.7s | Slow beeps for distant enemies |
+| Interval (close) | 0.12s | Fast beeps for nearby enemies |
+
+##### Pitch by Direction
+| Direction | Frequency Range | Description |
+|-----------|-----------------|-------------|
+| Forward/Sides | 400-900 Hz | Normal pitch, rises with proximity |
+| Back | 200-500 Hz | Lower pitch, rises with proximity |
+
+```csharp
+// Pitch calculation
+if (directionIndex == 2) // Back - lower pitch
+{
+    frequency = 200 + (proximityFactor * 300);
+}
+else // Forward, Left, Right - normal pitch
+{
+    frequency = 400 + (proximityFactor * 500);
+}
+```
+
+##### Volume Calculation
+```csharp
+float countBoost = Mathf.Clamp01(group.Count / 5f) * 0.12f;
+float volume = (0.2f + proximityFactor * 0.3f + countBoost);
+volume = Mathf.Clamp(volume, 0.15f, 0.5f);
+```
+- Base volume increases with proximity (quadratic curve)
+- Count boost: more enemies = slightly louder
+- Clamped to comfortable range
+
+##### Interval Calculation
+```csharp
+float proximityFactor = 1f - (group.ClosestDistance / maxDistance);
+proximityFactor = proximityFactor * proximityFactor; // Quadratic curve
+float countFactor = Mathf.Clamp01(group.Count / 10f);
+float interval = Mathf.Lerp(baseInterval, minInterval, Mathf.Max(proximityFactor, countFactor));
+```
+- Closer enemies = faster beeps
+- More enemies = faster beeps
+- Uses whichever factor is higher
+
+##### Configuration
+```csharp
+private float maxDistance = 40f;      // Max enemy detection range
+private float baseInterval = 0.7f;    // Beep interval (far)
+private float minInterval = 0.12f;    // Beep interval (close/many)
+private float baseVolume = 0.15f;     // Base volume
+```
+
+##### Audio Channels
+Uses 4 separate NAudio channels (one per direction):
+- Each has its own `WaveOutEvent` and `PanningSampleProvider`
+- Pan value calculated from enemy position relative to camera
+- Allows simultaneous sounds from multiple directions
+
+---
+
+#### Game Alert Messages
+
+**Status:** In Progress
+
+##### Overview
+Patches AlertUi class to read game messages via screen reader (wave alerts, boss alerts, time warnings).
+
+##### Patched Methods
+| Method | Trigger | Example Message |
+|--------|---------|-----------------|
+| `SetAlert(EWaveType)` | Wave timer alert | "Wave in 30 seconds" |
+| `SetAlertBoss` | Boss approaching | "Boss approaching" |
+| `SetAlertTimesUp` | Time limit reached | "Time's up" |
+| `OnSwarmStarted` | Swarm begins | "Swarm!" |
+| `OnFinalSwarmStarted` | Final swarm | "Final swarm!" |
+
+##### Implementation
+```csharp
+[HarmonyPatch(typeof(AlertUi))]
+public static class AlertUiPatch
+{
+    private static string lastAlertText = "";
+    private static float lastAlertTime = 0f;
+    private const float DEBOUNCE_TIME = 1.0f;
+
+    private static void ReadAlertText(AlertUi instance, string source)
+    {
+        // Debounce to avoid repetitions
+        if (Time.time - lastAlertTime < DEBOUNCE_TIME) return;
+
+        // Read alert text from t_alert TextMeshProUGUI
+        string text = instance.t_alert.text;
+        if (text == lastAlertText) return;
+
+        lastAlertText = text;
+        lastAlertTime = Time.time;
+        TolkUtil.Speak(text);
+    }
+}
+```
+
+##### Known Issues
+- [ ] Some alerts may not trigger (needs more testing)
+- [ ] May need to patch additional methods (AnimateAlert, etc.)
 
 ---
 
@@ -515,11 +641,15 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 - `EnemyPatch.cs` - Enemy tracking via InitEnemy/Kill patches + EnemyTracker static class
 
 ### Components
-- `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling
+- `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling (boss portal volume: 1.2)
 - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
 - `WallNavigationAudio.cs` - Wall detection with soft triangle waves + 8-bit collision sound
-- `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (localized names)
+- `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (2s cooldown)
+- `EnemyAudioSystem.cs` - Synthetic directional beeps for enemy positions (4-direction grouping)
 - `NavigationAudioSystem.cs` - Wind-based objective guidance (currently disabled, experimental)
+
+### New Patches
+- `AlertUiPatch.cs` - Game alert messages (waves, boss, time) via screen reader
 
 ### State Trackers
 - `MenuStateTracker` (in UpgradeButtonPatch.cs) - Detects open menus via button search
