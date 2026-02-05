@@ -478,6 +478,50 @@ Uses 4 separate NAudio channels (one per direction):
 
 ---
 
+#### Portal Distance Announcer
+
+**Status:** Functional
+
+##### Overview
+On-demand portal distance announcement via keyboard shortcut. Press **P** to hear the distance to the next level portal.
+
+##### Usage
+- Press **P** key during gameplay
+- Screen reader announces: "Portal a X unidades" (Portal at X units)
+- If no portal exists: "No hay portal en este nivel"
+
+##### Implementation
+```csharp
+// PortalDistanceAnnouncer.cs
+void Update()
+{
+    if (Input.GetKeyDown(KeyCode.P))
+    {
+        AnnouncePortalDistance();
+    }
+}
+
+private void AnnouncePortalDistance()
+{
+    // Search for Portal and BossSpawner objects
+    // Calculate distance from player
+    // Announce via TolkUtil.Speak()
+}
+```
+
+##### Portal Detection
+Searches for these object names:
+- `Portal`, `Portal(Clone)`, `Portal (Clone)`
+- `BossSpawner`, `BossSpawner(Clone)`, `BossSpawner (Clone)`
+- Also searches in common containers: `Interactables`, `Objects`, `World`, `Level`, `Spawned`
+
+##### Configuration
+```csharp
+private float announceCooldown = 0.5f;  // Prevents spam
+```
+
+---
+
 #### Game Alert Messages
 
 **Status:** In Progress
@@ -646,6 +690,7 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 - `WallNavigationAudio.cs` - Wall detection with soft triangle waves + 8-bit collision sound
 - `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (2s cooldown)
 - `EnemyAudioSystem.cs` - Synthetic directional beeps for enemy positions (4-direction grouping)
+- `PortalDistanceAnnouncer.cs` - Press P to announce distance to next level portal
 - `NavigationAudioSystem.cs` - Wind-based objective guidance (currently disabled, experimental)
 
 ### New Patches

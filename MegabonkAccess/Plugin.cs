@@ -62,6 +62,9 @@ public class Plugin : BasePlugin
             // Añadir el sistema de audio direccional para enemigos (sonido sintético)
             _audioManagerObject.AddComponent<EnemyAudioSystem>();
 
+            // Añadir el anunciador de distancia al portal (tecla P)
+            _audioManagerObject.AddComponent<PortalDistanceAnnouncer>();
+
             Log.LogInfo("[Plugin] All audio systems created successfully!");
         }
         catch (System.Exception e)
