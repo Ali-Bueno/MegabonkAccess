@@ -405,76 +405,63 @@ Silences during:
 **Status:** Functional
 
 ##### Overview
-Real-time synthetic audio feedback for enemy positions. Generates square/triangle wave beeps with 3D panning to indicate enemy presence and direction. Groups enemies by direction to avoid sound spam.
+Real-time synthetic audio feedback for enemy positions. Generates distinct sounds for different enemy types (Normal, Elite, Boss) with 3D panning. Uses 8 directions for precise positioning.
 
-##### Directional Grouping
-Enemies are grouped into 4 directions (one sound per direction):
-- **Forward (0):** -45° to +45° from camera forward
-- **Right (1):** +45° to +135°
-- **Back (2):** +135° to +180° and -135° to -180°
-- **Left (3):** -45° to -135°
+##### Directional Grouping (8 directions)
+Enemies are grouped into 8 directions (45° each):
+- **Forward (0):** -22.5° to +22.5°
+- **Forward-Right (1):** +22.5° to +67.5°
+- **Right (2):** +67.5° to +112.5°
+- **Back-Right (3):** +112.5° to +157.5°
+- **Back (4):** +157.5° to +180° / -157.5° to -180°
+- **Back-Left (5):** -112.5° to -157.5°
+- **Left (6):** -67.5° to -112.5°
+- **Forward-Left (7):** -22.5° to -67.5°
 
-##### Sound Characteristics
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Waveform | 60% square + 40% triangle | Softer than pure square |
-| Duration | 80ms | Short beep |
-| Base volume | 0.15-0.5 | Comfortable range |
-| Interval (far) | 0.7s | Slow beeps for distant enemies |
-| Interval (close) | 0.12s | Fast beeps for nearby enemies |
+##### Sound by Enemy Type
 
-##### Pitch by Direction
-| Direction | Frequency Range | Description |
-|-----------|-----------------|-------------|
-| Forward/Sides | 400-900 Hz | Normal pitch, rises with proximity |
-| Back | 200-500 Hz | Lower pitch, rises with proximity |
+| Type | Frequency | Duration | Waveform | Characteristics |
+|------|-----------|----------|----------|-----------------|
+| **Boss** | 60-120 Hz (grave) | 250ms | Square + sub-octava | Descending pitch, very loud |
+| **Elite** | 150-300 Hz (medio) | 120ms | Triangle + square | 12 Hz vibrato |
+| **Normal** | 500-1000 Hz (agudo) | 60ms | Triangle + square | Short beep |
 
+##### Intervals by Type
+| Type | Far | Close |
+|------|-----|-------|
+| **Boss** | 1.2s | 0.4s |
+| **Elite** | 0.8s | 0.2s |
+| **Normal** | 0.5s | 0.1s |
+
+##### Volume by Type
+| Type | Range |
+|------|-------|
+| **Boss** | 0.6 - 0.9 |
+| **Elite** | 0.5 - 0.75 |
+| **Normal** | 0.4 - 0.75 |
+
+##### Pan Calculation
+Uses the **closest enemy** of each type for precise panning (not average):
 ```csharp
-// Pitch calculation
-if (directionIndex == 2) // Back - lower pitch
-{
-    frequency = 200 + (proximityFactor * 300);
-}
-else // Forward, Left, Right - normal pitch
-{
-    frequency = 400 + (proximityFactor * 500);
-}
-```
-
-##### Volume Calculation
-```csharp
-float countBoost = Mathf.Clamp01(group.Count / 5f) * 0.12f;
-float volume = (0.2f + proximityFactor * 0.3f + countBoost);
-volume = Mathf.Clamp(volume, 0.15f, 0.5f);
-```
-- Base volume increases with proximity (quadratic curve)
-- Count boost: more enemies = slightly louder
-- Clamped to comfortable range
-
-##### Interval Calculation
-```csharp
-float proximityFactor = 1f - (group.ClosestDistance / maxDistance);
-proximityFactor = proximityFactor * proximityFactor; // Quadratic curve
-float countFactor = Mathf.Clamp01(group.Count / 10f);
-float interval = Mathf.Lerp(baseInterval, minInterval, Mathf.Max(proximityFactor, countFactor));
-```
-- Closer enemies = faster beeps
-- More enemies = faster beeps
-- Uses whichever factor is higher
-
-##### Configuration
-```csharp
-private float maxDistance = 40f;      // Max enemy detection range
-private float baseInterval = 0.7f;    // Beep interval (far)
-private float minInterval = 0.12f;    // Beep interval (close/many)
-private float baseVolume = 0.15f;     // Base volume
+// Pan del enemigo más cercano
+float pan = Vector3.Dot(toEnemy, right);
+pan = Mathf.Clamp(pan, -1f, 1f);
 ```
 
 ##### Audio Channels
-Uses 4 separate NAudio channels (one per direction):
-- Each has its own `WaveOutEvent` and `PanningSampleProvider`
-- Pan value calculated from enemy position relative to camera
-- Allows simultaneous sounds from multiple directions
+Uses 24 NAudio channels (8 directions × 3 types):
+- Allows Boss, Elite, and Normal sounds simultaneously
+- Each channel has independent pan and volume
+- Sounds can overlap from different directions
+
+##### Menu Detection
+Same detection as DirectionalAudioManager:
+- TimeScale < 0.1 (pause)
+- Pause menu objects
+- Chest window/animation
+- Upgrade buttons, reward windows
+- Encounter/shrine menus
+- Death camera and death buttons
 
 ---
 
