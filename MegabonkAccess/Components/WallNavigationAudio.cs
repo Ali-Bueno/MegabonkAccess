@@ -192,11 +192,226 @@ namespace MegabonkAccess.Components
     }
 
     /// <summary>
-    /// Sistema de navegación por audio que detecta paredes con tonos suaves.
+    /// Información sobre espacios verticales detectados.
+    /// </summary>
+    public struct VerticalSpace
+    {
+        public bool hasGapAbove;       // Puedo saltar/pasar arriba
+        public bool hasTunnelBelow;    // Puedo agacharme
+        public bool hasPlatformAbove;  // Plataforma alcanzable arriba
+        public float distance;
+    }
+
+    /// <summary>
+    /// Generador de sweep rápido para gaps (200→800 Hz, 100ms).
+    /// </summary>
+    public class GapSweepGenerator : ISampleProvider
+    {
+        private readonly WaveFormat waveFormat;
+        private int samplesRemaining;
+        private readonly int totalSamples;
+        private double phase;
+        private const double START_FREQ = 200;
+        private const double END_FREQ = 800;
+        private const float VOLUME = 0.35f;
+
+        public WaveFormat WaveFormat => waveFormat;
+
+        public GapSweepGenerator(int sampleRate = 44100)
+        {
+            waveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2);
+            totalSamples = (int)(sampleRate * 0.1); // 100ms
+            samplesRemaining = 0;
+        }
+
+        public void Play()
+        {
+            samplesRemaining = totalSamples;
+            phase = 0;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            for (int i = 0; i < count; i += 2)
+            {
+                float sample = 0;
+                if (samplesRemaining > 0)
+                {
+                    double progress = 1.0 - (double)samplesRemaining / totalSamples;
+                    double freq = START_FREQ + (END_FREQ - START_FREQ) * progress;
+                    sample = (float)(Math.Sin(2 * Math.PI * phase) * VOLUME);
+                    phase += freq / waveFormat.SampleRate;
+                    if (phase >= 1.0) phase -= 1.0;
+                    samplesRemaining--;
+                }
+                buffer[offset + i] = sample;
+                buffer[offset + i + 1] = sample;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Generador de pulsos bajos para túneles (150 Hz, 200ms pulsos).
+    /// </summary>
+    public class TunnelPulseGenerator : ISampleProvider
+    {
+        private readonly WaveFormat waveFormat;
+        private int samplesRemaining;
+        private readonly int totalSamples;
+        private double phase;
+        private const double FREQ = 150;
+        private const float VOLUME = 0.3f;
+
+        public WaveFormat WaveFormat => waveFormat;
+
+        public TunnelPulseGenerator(int sampleRate = 44100)
+        {
+            waveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2);
+            totalSamples = (int)(sampleRate * 0.2); // 200ms
+            samplesRemaining = 0;
+        }
+
+        public void Play()
+        {
+            samplesRemaining = totalSamples;
+            phase = 0;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            for (int i = 0; i < count; i += 2)
+            {
+                float sample = 0;
+                if (samplesRemaining > 0)
+                {
+                    // Triangle wave
+                    double triangleWave = 2.0 * Math.Abs(2.0 * phase - 1.0) - 1.0;
+                    sample = (float)(triangleWave * VOLUME);
+                    phase += FREQ / waveFormat.SampleRate;
+                    if (phase >= 1.0) phase -= 1.0;
+                    samplesRemaining--;
+                }
+                buffer[offset + i] = sample;
+                buffer[offset + i + 1] = sample;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Generador de sweep ascendente suave para plataformas (300→600 Hz, 150ms).
+    /// </summary>
+    public class PlatformSweepGenerator : ISampleProvider
+    {
+        private readonly WaveFormat waveFormat;
+        private int samplesRemaining;
+        private readonly int totalSamples;
+        private double phase;
+        private const double START_FREQ = 300;
+        private const double END_FREQ = 600;
+        private const float VOLUME = 0.3f;
+
+        public WaveFormat WaveFormat => waveFormat;
+
+        public PlatformSweepGenerator(int sampleRate = 44100)
+        {
+            waveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2);
+            totalSamples = (int)(sampleRate * 0.15); // 150ms
+            samplesRemaining = 0;
+        }
+
+        public void Play()
+        {
+            samplesRemaining = totalSamples;
+            phase = 0;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            for (int i = 0; i < count; i += 2)
+            {
+                float sample = 0;
+                if (samplesRemaining > 0)
+                {
+                    double progress = 1.0 - (double)samplesRemaining / totalSamples;
+                    double freq = START_FREQ + (END_FREQ - START_FREQ) * progress;
+                    sample = (float)(Math.Sin(2 * Math.PI * phase) * VOLUME);
+                    phase += freq / waveFormat.SampleRate;
+                    if (phase >= 1.0) phase -= 1.0;
+                    samplesRemaining--;
+                }
+                buffer[offset + i] = sample;
+                buffer[offset + i + 1] = sample;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Generador de sweep descendente para desniveles (400→200 Hz, 150ms).
+    /// </summary>
+    public class DropSweepGenerator : ISampleProvider
+    {
+        private readonly WaveFormat waveFormat;
+        private int samplesRemaining;
+        private readonly int totalSamples;
+        private double phase;
+        private const double START_FREQ = 400;
+        private const double END_FREQ = 200;
+        private const float VOLUME = 0.4f; // Un poco más alto (peligro)
+
+        public WaveFormat WaveFormat => waveFormat;
+
+        public DropSweepGenerator(int sampleRate = 44100)
+        {
+            waveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2);
+            totalSamples = (int)(sampleRate * 0.15); // 150ms
+            samplesRemaining = 0;
+        }
+
+        public void Play()
+        {
+            samplesRemaining = totalSamples;
+            phase = 0;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            for (int i = 0; i < count; i += 2)
+            {
+                float sample = 0;
+                if (samplesRemaining > 0)
+                {
+                    double progress = 1.0 - (double)samplesRemaining / totalSamples;
+                    double freq = START_FREQ + (END_FREQ - START_FREQ) * progress;
+                    sample = (float)(Math.Sin(2 * Math.PI * phase) * VOLUME);
+                    phase += freq / waveFormat.SampleRate;
+                    if (phase >= 1.0) phase -= 1.0;
+                    samplesRemaining--;
+                }
+                buffer[offset + i] = sample;
+                buffer[offset + i + 1] = sample;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Sistema de navegación por audio que detecta paredes y espacios verticales.
+    ///
+    /// PAREDES (4 direcciones):
     /// - Tono medio-agudo: pared adelante
     /// - Tono grave: pared detrás
     /// - Tono medio: paredes a los lados (con paneo estéreo)
-    /// - Volumen bajo y sutil, proporcional a la cercanía
+    ///
+    /// ESPACIOS VERTICALES (solo forward):
+    /// - Gap arriba: sweep ascendente rápido (200→800 Hz)
+    /// - Túnel bajo: pulsos graves (150 Hz)
+    /// - Plataforma arriba: sweep ascendente suave (300→600 Hz)
+    ///
+    /// DESNIVELES (4 direcciones, prioridad alta):
+    /// - Sweep descendente (400→200 Hz)
     /// </summary>
     public class WallNavigationAudio : MonoBehaviour
     {
@@ -246,6 +461,35 @@ namespace MegabonkAccess.Components
         private Vector3 lastPlayerPosition;
         private bool wasColliding = false;
 
+        // Sistema de espacios verticales (solo forward)
+        private GapSweepGenerator gapGenerator;
+        private WaveOutEvent gapOutput;
+        private float lastGapTime = 0f;
+        private float gapInterval = 3.5f;            // Cooldown largo para evitar spam
+
+        private TunnelPulseGenerator tunnelGenerator;
+        private WaveOutEvent tunnelOutput;
+        private float lastTunnelTime = 0f;
+        private float tunnelInterval = 4.0f;         // Cooldown largo para evitar spam
+
+        private PlatformSweepGenerator platformGenerator;
+        private WaveOutEvent platformOutput;
+        private float lastPlatformTime = 0f;
+        private float platformInterval = 3.5f;       // Cooldown largo para evitar spam
+
+        // Sistema de desniveles (solo forward, muy conservador)
+        private DropSweepGenerator dropGenerator;
+        private WaveOutEvent dropOutput;
+        private float lastDropTime = 0f;
+        private float dropInterval = 3.0f;           // Cooldown MUY largo (solo peligros reales)
+        private float dropCheckDistance = 2.5f;      // Más lejos para dar más tiempo de reacción
+        private float dropMinHeight = 3.0f;          // Solo caídas graves (3m+)
+        private float maxVerticalDistance = 2f;      // Solo detectar espacios MUY cerca (2m)
+
+        // Control de movimiento para drops
+        private Vector3 lastPlayerPosForDrop;
+        private float minMovementSpeed = 0.5f;       // Velocidad mínima para detectar drops
+
         static WallNavigationAudio()
         {
             ClassInjector.RegisterTypeInIl2Cpp<WallNavigationAudio>();
@@ -283,8 +527,11 @@ namespace MegabonkAccess.Components
                 // Crear el generador de sonido de colisión 8-bits
                 CreateCollisionSound();
 
+                // Crear los generadores de espacios verticales
+                CreateVerticalSpaceSounds();
+
                 isInitialized = true;
-                Plugin.Log.LogInfo($"[WallNav] Initialized with maxDistance={maxWallDistance}, baseVolume={baseVolume}, collision sound enabled");
+                Plugin.Log.LogInfo($"[WallNav] Initialized with maxDistance={maxWallDistance}, baseVolume={baseVolume}, collision + vertical sounds enabled");
             }
             catch (Exception e)
             {
@@ -305,6 +552,44 @@ namespace MegabonkAccess.Components
             catch (Exception e)
             {
                 Plugin.Log.LogError($"[WallNav] CreateCollisionSound error: {e.Message}");
+            }
+        }
+
+        private void CreateVerticalSpaceSounds()
+        {
+            try
+            {
+                // Gap (saltar/pasar arriba)
+                gapGenerator = new GapSweepGenerator();
+                gapOutput = new WaveOutEvent();
+                gapOutput.Init(gapGenerator);
+                gapOutput.Play();
+                Plugin.Log.LogInfo("[WallNav] Gap sweep generator created");
+
+                // Túnel (agacharse)
+                tunnelGenerator = new TunnelPulseGenerator();
+                tunnelOutput = new WaveOutEvent();
+                tunnelOutput.Init(tunnelGenerator);
+                tunnelOutput.Play();
+                Plugin.Log.LogInfo("[WallNav] Tunnel pulse generator created");
+
+                // Plataforma arriba (subir)
+                platformGenerator = new PlatformSweepGenerator();
+                platformOutput = new WaveOutEvent();
+                platformOutput.Init(platformGenerator);
+                platformOutput.Play();
+                Plugin.Log.LogInfo("[WallNav] Platform sweep generator created");
+
+                // Desnivel (bajar/peligro)
+                dropGenerator = new DropSweepGenerator();
+                dropOutput = new WaveOutEvent();
+                dropOutput.Init(dropGenerator);
+                dropOutput.Play();
+                Plugin.Log.LogInfo("[WallNav] Drop sweep generator created");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError($"[WallNav] CreateVerticalSpaceSounds error: {e.Message}");
             }
         }
 
@@ -428,8 +713,14 @@ namespace MegabonkAccess.Components
                 if (debugCounter % 300 == 0)
                     Plugin.Log.LogInfo("[WallNav] Running wall detection...");
 
-                // Actualizar detección de paredes cada frame
+                // Actualizar detección de paredes cada frame (4 direcciones)
                 UpdateWallDetection();
+
+                // Actualizar detección de espacios verticales (solo forward, CONSERVADOR)
+                UpdateVerticalSpaces();
+
+                // Actualizar detección de desniveles (solo forward cuando se mueve, MUY CONSERVADOR)
+                UpdateDropDetection();
 
                 // Detectar colisiones y reproducir sonido 8-bits
                 CheckCollision();
@@ -758,6 +1049,236 @@ namespace MegabonkAccess.Components
             }
         }
 
+        /// <summary>
+        /// Detecta espacios verticales en una dirección (gaps, túneles, plataformas).
+        /// CONSERVADOR: Solo se usa para forward, solo MUY cerca (<2m).
+        /// </summary>
+        private VerticalSpace CheckVerticalSpaces(Vector3 playerPos, Vector3 direction)
+        {
+            var result = new VerticalSpace();
+
+            try
+            {
+                // 1. Gap arriba - espacio por el que puedo pasar saltando
+                // Debe haber: pared a altura media PERO libre arriba
+                Vector3 midOrigin = playerPos + Vector3.up * 1.5f;
+                Vector3 highOrigin = playerPos + Vector3.up * 2.5f;
+
+                bool midBlocked = Physics.Raycast(midOrigin, direction, out RaycastHit midHit, maxVerticalDistance, wallLayerMask);
+                bool highClear = !Physics.Raycast(highOrigin, direction, maxVerticalDistance, wallLayerMask);
+
+                // Solo si está MUY CERCA (<2m) y hay espacio arriba
+                result.hasGapAbove = midBlocked && highClear && midHit.distance < maxVerticalDistance;
+                if (result.hasGapAbove)
+                {
+                    result.distance = midHit.distance;
+                }
+
+                // 2. Túnel bajo - espacio donde debo agacharme
+                // Debe haber: obstáculo a altura de pie PERO libre agachado EN LA MISMA DISTANCIA
+                Vector3 standOrigin = playerPos + Vector3.up * 2f;
+                Vector3 crouchOrigin = playerPos + Vector3.up * 1.2f;
+
+                bool standBlocked = Physics.Raycast(standOrigin, direction, out RaycastHit standHit, maxVerticalDistance, wallLayerMask);
+
+                // Verificar que a la misma distancia, agachado SÍ puedo pasar
+                bool crouchClear = false;
+                if (standBlocked)
+                {
+                    crouchClear = !Physics.Raycast(crouchOrigin, direction, standHit.distance, wallLayerMask);
+                }
+
+                // Solo si está MUY cerca y puedo pasar agachado
+                result.hasTunnelBelow = standBlocked && crouchClear && standHit.distance < maxVerticalDistance;
+                if (result.hasTunnelBelow)
+                {
+                    result.distance = standHit.distance;
+                }
+
+                // 3. Plataforma arriba - superficie horizontal a la que puedo subir
+                Vector3 diagOrigin = playerPos + Vector3.up * 1f;
+                Vector3 diagDirection = (direction + Vector3.up * 0.8f).normalized;
+
+                if (Physics.Raycast(diagOrigin, diagDirection, out RaycastHit diagHit, maxVerticalDistance + 1f, wallLayerMask))
+                {
+                    // Verificar que sea superficie caminable (normal hacia ARRIBA, no abajo!)
+                    float heightDiff = diagHit.point.y - playerPos.y;
+                    bool isWalkable = diagHit.normal.y > 0.7f; // Normal apunta arriba
+                    bool reachableHeight = heightDiff > 0.5f && heightDiff < 2.5f;
+
+                    result.hasPlatformAbove = isWalkable && reachableHeight && diagHit.distance < maxVerticalDistance + 1f;
+                    if (result.hasPlatformAbove)
+                    {
+                        result.distance = diagHit.distance;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[WallNav] CheckVerticalSpaces error: {e.Message}");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Detecta desniveles/caídas en una dirección.
+        /// CONSERVADOR: Solo detecta caídas graves (>3m) y cuando el jugador se está moviendo.
+        /// </summary>
+        private bool CheckDropAhead(Vector3 playerPos, Vector3 direction, out float dropDistance)
+        {
+            dropDistance = 0f;
+
+            try
+            {
+                // Verificar primero si hay pared adelante (si hay pared, no hay drop)
+                Vector3 wallCheckOrigin = playerPos + Vector3.up * 1f;
+                if (Physics.Raycast(wallCheckOrigin, direction, dropCheckDistance * 0.8f, wallLayerMask))
+                {
+                    // Hay pared adelante, no hay drop
+                    return false;
+                }
+
+                // Posición adelante en la dirección (más lejos para dar tiempo)
+                Vector3 checkPos = playerPos + direction * dropCheckDistance;
+
+                // Raycast hacia abajo desde altura del jugador
+                Vector3 rayOrigin = checkPos + Vector3.up * 0.5f;
+                float rayDistance = dropMinHeight + 1.5f; // 4.5m total
+
+                bool hasGround = Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, wallLayerMask);
+
+                if (!hasGround)
+                {
+                    // No hay suelo en absoluto = drop MUY profundo
+                    dropDistance = dropCheckDistance;
+                    Plugin.Log.LogInfo($"[WallNav] Deep drop detected (no ground)");
+                    return true;
+                }
+
+                // Verificar si el suelo está MUCHO más abajo que el jugador
+                float heightDiff = playerPos.y - hit.point.y;
+                if (heightDiff > dropMinHeight)
+                {
+                    dropDistance = dropCheckDistance;
+                    Plugin.Log.LogInfo($"[WallNav] High drop detected: {heightDiff:F1}m");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[WallNav] CheckDropAhead error: {e.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Reproduce sonidos de espacios verticales solo en forward.
+        /// </summary>
+        private void UpdateVerticalSpaces()
+        {
+            if (playerTransform == null || cameraTransform == null) return;
+
+            try
+            {
+                Vector3 playerPos = playerTransform.position;
+                Vector3 forward = cameraTransform.forward;
+                forward.y = 0;
+                if (forward.sqrMagnitude < 0.001f) return;
+                forward = forward.normalized;
+
+                // Detectar espacios verticales en forward
+                VerticalSpace vSpace = CheckVerticalSpaces(playerPos, forward);
+
+                // Debug periódico
+                if (debugCounter % 120 == 0)
+                {
+                    Plugin.Log.LogInfo($"[WallNav] VertCheck: gap={vSpace.hasGapAbove}, tunnel={vSpace.hasTunnelBelow}, platform={vSpace.hasPlatformAbove}");
+                }
+
+                // Reproducir sonidos según lo detectado (con intervalos)
+                if (vSpace.hasGapAbove && Time.time - lastGapTime > gapInterval)
+                {
+                    gapGenerator?.Play();
+                    lastGapTime = Time.time;
+                    Plugin.Log.LogInfo($"[WallNav] >>> GAP at {vSpace.distance:F1}m");
+                }
+
+                if (vSpace.hasTunnelBelow && Time.time - lastTunnelTime > tunnelInterval)
+                {
+                    tunnelGenerator?.Play();
+                    lastTunnelTime = Time.time;
+                    Plugin.Log.LogInfo($"[WallNav] >>> TUNNEL at {vSpace.distance:F1}m");
+                }
+
+                if (vSpace.hasPlatformAbove && Time.time - lastPlatformTime > platformInterval)
+                {
+                    platformGenerator?.Play();
+                    lastPlatformTime = Time.time;
+                    Plugin.Log.LogInfo($"[WallNav] >>> PLATFORM at {vSpace.distance:F1}m");
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[WallNav] UpdateVerticalSpaces error: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reproduce sonidos de desniveles solo en forward cuando el jugador se mueve.
+        /// MUY CONSERVADOR: Solo caídas graves (>3m) con cooldown largo (3s).
+        /// </summary>
+        private void UpdateDropDetection()
+        {
+            if (playerTransform == null || cameraTransform == null) return;
+
+            try
+            {
+                Vector3 playerPos = playerTransform.position;
+
+                // Verificar si el jugador se está moviendo
+                Vector3 movement = playerPos - lastPlayerPosForDrop;
+                float speed = movement.magnitude / Time.deltaTime;
+                lastPlayerPosForDrop = playerPos;
+
+                // Solo detectar drops si el jugador se está moviendo hacia adelante
+                if (speed < minMovementSpeed)
+                {
+                    return; // No moverse = no advertir
+                }
+
+                Vector3 forward = cameraTransform.forward;
+                forward.y = 0;
+                if (forward.sqrMagnitude < 0.001f) return;
+                forward = forward.normalized;
+
+                // Verificar que el movimiento sea hacia adelante (no hacia atrás/lados)
+                Vector3 moveDir = movement.normalized;
+                float forwardDot = Vector3.Dot(moveDir, forward);
+                if (forwardDot < 0.5f)
+                {
+                    return; // Movimiento no es hacia adelante
+                }
+
+                // Solo verificar drops en forward cuando hay movimiento adelante
+                if (CheckDropAhead(playerPos, forward, out float dropDist))
+                {
+                    if (Time.time - lastDropTime > dropInterval)
+                    {
+                        dropGenerator?.Play();
+                        lastDropTime = Time.time;
+                        Plugin.Log.LogInfo($"[WallNav] >>> DROP AHEAD at {dropDist:F1}m");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogDebug($"[WallNav] UpdateDropDetection error: {e.Message}");
+            }
+        }
+
         private void SilenceAllChannels()
         {
             lock (channelLock)
@@ -819,6 +1340,20 @@ namespace MegabonkAccess.Components
             {
                 collisionOutput?.Stop();
                 collisionOutput?.Dispose();
+            }
+            catch { }
+
+            // Limpiar los sonidos de espacios verticales
+            try
+            {
+                gapOutput?.Stop();
+                gapOutput?.Dispose();
+                tunnelOutput?.Stop();
+                tunnelOutput?.Dispose();
+                platformOutput?.Stop();
+                platformOutput?.Dispose();
+                dropOutput?.Stop();
+                dropOutput?.Dispose();
             }
             catch { }
 
