@@ -308,6 +308,62 @@ private float collisionDistance = 1.5f;    // Collision trigger distance
 private float collisionCooldown = 0.3f;    // Seconds between collision sounds
 ```
 
+##### Vertical Space Detection (Experimental)
+
+**Status:** Preliminary/Experimental - very conservative to avoid false positives
+
+Detects navigable vertical spaces using raycasts at multiple heights. Only detects in **forward direction** to avoid audio overload.
+
+###### Gap Detection (Jump Through)
+Detects low obstacles that can be jumped over:
+- **Sound**: Sweep up 200→800 Hz, 100ms
+- **Detection**: Wall at mid-height (1.5m) BUT clear above (2.5m)
+- **Range**: <2m (very close)
+- **Cooldown**: 3.5 seconds
+
+###### Tunnel Detection (Crouch Through)
+Detects low ceiling spaces requiring crouch:
+- **Sound**: Triangle wave pulses at 150 Hz, 200ms
+- **Detection**: Blocked at standing height (2m) BUT clear crouched (1.2m) at same distance
+- **Range**: <2m (very close)
+- **Cooldown**: 4 seconds
+
+###### Platform Detection (Climb Up)
+Detects climbable surfaces ahead:
+- **Sound**: Sweep up 300→600 Hz, 150ms
+- **Detection**: Diagonal raycast (45° up), walkable surface (normal.y > 0.7)
+- **Height range**: 0.5m - 2.5m (reachable)
+- **Range**: <3m
+- **Cooldown**: 3.5 seconds
+
+###### Drop Detection (Dangerous Falls)
+Warns about dangerous drops ahead:
+- **Sound**: Sweep down 400→200 Hz, 150ms, louder (0.4 volume)
+- **Detection**: No ground within 3m drop OR ground >3m below
+- **Range**: 2.5m ahead
+- **Cooldown**: 3 seconds
+- **Safety**: Only triggers when moving forward (>0.5 m/s), checks for walls first
+- **Purpose**: Prevent walking off cliffs/high platforms
+
+###### Configuration (vertical detection)
+```csharp
+private float maxVerticalDistance = 2f;      // Max range for gap/tunnel/platform
+private float dropMinHeight = 3.0f;          // Only warn for dangerous drops (>3m)
+private float dropCheckDistance = 2.5f;      // How far ahead to check
+private float minMovementSpeed = 0.5f;       // Must be moving to detect drops
+private float gapInterval = 3.5f;            // Gap announcement cooldown
+private float tunnelInterval = 4.0f;         // Tunnel announcement cooldown
+private float platformInterval = 3.5f;       // Platform announcement cooldown
+private float dropInterval = 3.0f;           // Drop warning cooldown
+```
+
+###### Known Issues / TODO
+- [ ] May miss some valid gaps/tunnels (conservative approach)
+- [ ] Drop detection may not work on all terrain types
+- [ ] No detection for left/right gaps (only forward)
+- [ ] Needs extensive testing in different level types
+- [ ] Consider adding user-configurable sensitivity
+
 ---
 
 #### Enemy Announcement System
@@ -674,7 +730,7 @@ text = Regex.Replace(text, @"\b[fsde]{2,}(\s+[fsde]{2,})+\b", "", RegexOptions.I
 ### Components
 - `DirectionalAudioManager.cs` - Beacon tracking, scanning, and scheduling (boss portal volume: 1.2)
 - `NAudioBeaconPlayer.cs` - NAudio-based 3D audio with pan/volume/pitch, LoopStream, Pause/Resume
-- `WallNavigationAudio.cs` - Wall detection with soft triangle waves + 8-bit collision sound
+- `WallNavigationAudio.cs` - Wall detection with soft triangle waves + 8-bit collision sound + experimental vertical space detection (gaps, tunnels, platforms, drops)
 - `EnemyAnnouncementSystem.cs` - Auto-announce enemies on direction change and new threats (2s cooldown)
 - `EnemyAudioSystem.cs` - Synthetic directional beeps for enemy positions (4-direction grouping)
 - `PortalDistanceAnnouncer.cs` - Press P to announce distance to next level portal
